@@ -1,0 +1,14 @@
+pattern,N,%
+icmp,100300,19
+br,87523,16
+add,68222,12
+getelementptr,60800,11
+load,59600,11
+shl,40000,7
+sdiv,40000,7
+select,40000,7
+store,21200,4
+call,8325,1
+srem,1000,0
+alloca,1,0
+ret,1,0

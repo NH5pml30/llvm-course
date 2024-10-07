@@ -1,0 +1,30 @@
+pattern,N,%
+load <- getelementptr,59600,11
+icmp <- add;_,40300,7
+br <- icmp;_;_,40300,7
+getelementptr <- alloca;_;_;_,40000,7
+shl <- _;_,40000,7
+sdiv <- shl;_,40000,7
+icmp <- sdiv;_,40000,7
+br <- _,26439,5
+add <- sdiv;_,26338,5
+store <- add;getelementptr,20800,3
+add <- _;_,20300,3
+getelementptr <- alloca;_;_,20200,3
+add <- load;_,20000,3
+icmp <- load;_,20000,3
+select <- icmp;icmp;_,20000,3
+select <- select;icmp;_,20000,3
+br <- select;_;_,20000,3
+call <- add;add;_;_,6338,1
+call <- _,1100,0
+srem <- call;_,1000,0
+add <- srem;_,800,0
+getelementptr <- getelementptr;_,600,0
+store <- srem;getelementptr,200,0
+store <- _;getelementptr,200,0
+call <- _;_,100,0
+call <- _;alloca;_,2,0
+alloca <- _,1,0
+call <- alloca;_;_;_;_,1,0
+ret <-,1,0

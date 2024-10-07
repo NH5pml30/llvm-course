@@ -1,0 +1,1 @@
+add_llvm_pass_plugin(InstrUseTracePass instr_use_trace.cpp)
