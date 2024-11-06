@@ -41,6 +41,8 @@ bool assembler::one() {
   std::string inst;
   i >> inst;
 
+  std::cout << "inst: " << inst << std::endl;
+
   assembler_reader reader(i);
 
   if (inst.ends_with(":")) {

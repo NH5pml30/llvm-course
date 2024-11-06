@@ -15,6 +15,7 @@ void CPU::stop() {
 }
 
 void CPU::step() {
+  //std::cout << "inst: " << #name << "\n";                                             
   memory_io mem_io{&mem[PC]};
   unsigned char op = mem_io.read<unsigned char>();
   CPU *cpu = this;
