@@ -1,9 +1,10 @@
 #pragma once
 
-#include "memory_io.h"
-#include <vector>
 #include <istream>
 #include <map>
+#include <vector>
+
+#include "../memory_io.h"
 
 class assembler {
 public:

@@ -1,5 +1,6 @@
-#include "memory_io.h"
-#include "util.h"
+#include "../memory_io.h"
+#include "../util.h"
+#include "../isa.h"
 #include "asm.h"
 
 assembler::assembler(std::istream &i) : i(i) {}
@@ -9,7 +10,12 @@ struct assembler_reader {
 
   int read(reg) {
     int val;
-    s.ignore(std::numeric_limits<std::streamsize>::max(), 'r');
+    char r;
+    s >> std::ws >> r;
+    if (r != 'r') {
+      std::cerr << "Expected register argument" << std::endl;
+      exit(1);
+    }
     s >> val;
     return val;
   }
@@ -50,16 +56,18 @@ bool assembler::one() {
     return true;
   }
 
-#define ISA(opcode, name, exec, args_type)                                               \
-  else if (inst == #name) {                                                              \
-    auto arg_values = read_args_storage(reader, argument_type<void(args_type)>::type{}); \
-    writer.write<uint8_t>(opcode);                                                       \
-    arg_values.write(writer);                                                            \
-    return true;                                                                         \
-  }
-#include "isa.h"
-#undef ISA
-  else if (!inst.empty()) {
+  bool found = find_inst<bool>(
+      [&inst]<typename Inst>(Inst) { return Inst::name == inst; },
+      [&]<typename Inst>(Inst) {
+        auto arg_values = read_args_storage(reader, typename Inst::args_t{});
+        writer.write<uint8_t>(Inst::op_code);
+        arg_values.write(writer);
+        return true;
+      });
+  if (found)
+    return true;
+
+  if (!inst.empty()) {
     std::cerr << "Unknown instruction: " << inst << "\n";
     exit(1);
   }
