@@ -12,8 +12,14 @@ target_compile_options(sim PRIVATE ${SDL2_CFLAGS_OTHER})
 add_executable(4_sim memory.cpp sim/cpu.cpp sim/asm.cpp sim/main_sim.cpp)
 target_link_libraries(4_sim sim)
 
-add_executable(4_func memory.cpp func/gen.cpp func/main_func.cpp)
 find_package(LLVM REQUIRED CONFIG)
+
+add_executable(4_func memory.cpp func/gen.cpp func/main_func.cpp)
 target_include_directories(4_func PRIVATE ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(4_func PRIVATE ${LLVM_DEFINITIONS})
 target_link_libraries(4_func sim LLVM)
+
+add_executable(4_full memory.cpp full/gen.cpp full/main_full.cpp)
+target_include_directories(4_full PRIVATE ${LLVM_INCLUDE_DIRS})
+target_compile_definitions(4_full PRIVATE ${LLVM_DEFINITIONS})
+target_link_libraries(4_full sim LLVM)

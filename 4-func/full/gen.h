@@ -1,5 +1,6 @@
 #pragma once
 
+#include <llvm/IR/GlobalVariable.h>
 #include <map>
 
 #include <llvm/IR/BasicBlock.h>
@@ -18,12 +19,17 @@ public:
   llvm::LLVMContext context;
   llvm::Module *module{};
   llvm::Function *main_func{};
-  llvm::GlobalVariable *runtime_context{};
   llvm::GlobalVariable *reg_file{};
-  llvm::GlobalVariable *stack_mem{};
-  llvm::GlobalVariable *stack{};
   llvm::IRBuilder<> builder = llvm::IRBuilder<>(context);
   llvm::BasicBlock *default_dest{};
+
+  llvm::Type *reg_type;
+
+  llvm::FunctionCallee simRand;
+  llvm::FunctionCallee simFlush;
+  llvm::FunctionCallee simPutPixel;
+  llvm::FunctionCallee simClear;
+  llvm::FunctionCallee printf;
 
   void fixup_bb(llvm::User::op_iterator iter, const std::string &name);
   std::string split_bb();

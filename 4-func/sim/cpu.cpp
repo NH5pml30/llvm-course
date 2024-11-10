@@ -31,6 +31,6 @@ void CPU::step() {
             });
 }
 
-void CPU::jump(uint32_t to) {
+void CPU::jump(uintptr_t to) {
   this->PC = to;
 }

@@ -8,7 +8,7 @@
 
 class assembler {
 public:
-  static constexpr uint32_t MEM_SIZE = 1024;
+  static constexpr size_t MEM_SIZE = 2048;
 
   assembler(std::istream &i);
 

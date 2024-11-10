@@ -1,10 +1,10 @@
 app:
-  ALLOCA r0 2400
+  ALLOCA r0 4800
 
 init_header:
   JMPEQi r1 200 init_exit
 
-  MULADDi r2 r0 r1 12
+  MULADDi r2 r0 r1 24
 
   SIM_RAND r3
   REMi r3 r3 200
@@ -14,12 +14,12 @@ init_header:
   SIM_RAND r3
   REMi r3 r3 200
   ADDi r3 r3 -100
-  ADDi r2 r2 4
+  ADDi r2 r2 8
   STORE r2 r3
 
   SIM_RAND r3
   REMi r3 r3 100
-  ADDi r2 r2 4
+  ADDi r2 r2 8
   STORE r2 r3
   ADDi r1 r1 1
   JMP init_header
@@ -31,9 +31,9 @@ init_exit:
 update_header:
   JMPEQi r1 200 update_exit
 
-  MULADDi r2 r0 r1 12
+  MULADDi r2 r0 r1 24
   SET r3 r2
-  ADDi r3 r3 8
+  ADDi r3 r3 16
   LOAD r4 r3
   ADDi r4 r4 -1
   STORE r3 r4
@@ -48,10 +48,10 @@ update_header:
   SIM_RAND r4
   REMi r4 r4 200
   ADDi r4 r4 -100
-  ADDi r6 r6 4
+  ADDi r6 r6 8
   STORE r6 r4
 
-  ADDi r6 r6 4
+  ADDi r6 r6 8
   SETi r4 100
   STORE r6 r4
 
@@ -61,7 +61,7 @@ compute:
   DIV r5 r5 r4
   ADDi r5 r5 256
 
-  ADDi r6 r2 4
+  ADDi r6 r2 8
   LOAD r6 r6
   SHLi r6 r6 7
   DIV r6 r6 r4

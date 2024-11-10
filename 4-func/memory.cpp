@@ -4,12 +4,12 @@ extern "C" {
 #include "sim.h"
 }
 
-uint32_t memory::alloc(uint32_t sz) {
+uintptr_t memory::alloc(size_t sz) {
   return stack -= sz;
 }
 
-int32_t &memory::deref(uint32_t addr) {
-  return *(int32_t *)(&stack_mem[addr]);
+intptr_t &memory::deref(uintptr_t addr) {
+  return *(intptr_t *)&stack_mem[addr];
 }
 
 int memory::simRand() {

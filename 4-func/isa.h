@@ -41,14 +41,14 @@ struct inst_base {
 };
 
 // begin
-
-// control flow
 namespace llvm {
   class ReturnInst;
   class BranchInst;
   class CmpInst;
+  class Value;
 }
 
+// control flow
 template<typename Derived, uint8_t OpCode, auto Name, typename ...Args>
 struct inst_control_flow_base : inst_base<Derived, OpCode, Name, Args...> {};
 
@@ -60,11 +60,10 @@ struct inst_jmp_cmp : inst_control_flow_base<Derived, OpCode, Name, Args...> {
                     0>;
 
   static void exec(auto &ctx, const auto &a, const auto &b, const auto &l) { if (PredT{}(a, b)) ctx.jump(l); }
-  static llvm::BranchInst *gen_impl(auto &ctx, LLVMPredT<decltype(ctx)> llvm_pred, const auto &a, const auto &b, const auto &l) {
+  static llvm::BranchInst *gen(auto &ctx, const auto &a, const auto &b, const auto &l) {
     auto *I = ctx.builder.CreateCondBr(
-        ctx.builder.CreateTrunc(
-            ctx.builder.CreateICmp(llvm_pred, a.read, b.read),
-            ctx.builder.getInt1Ty()),
+        ctx.builder.CreateICmp(Derived::template llvm_pred<decltype(ctx)>,
+                               a.read, b.read),
         ctx.default_dest, ctx.default_dest);
     ctx.fixup_bb(I->op_begin() + 1, ctx.split_bb());
     ctx.fixup_bb(I->op_begin() + 2, l);
@@ -88,42 +87,73 @@ struct inst_jmp : inst_control_flow_base<inst_jmp, 0x02, "JMP"_n, label> {
   }
 };
 
-struct inst_jmpeqi : inst_jmp_cmp <inst_jmpeqi, std::equal_to<>,    0x03, "JMPEQi"_n, reg, imm<int32_t>, label> {
-  template<typename = void>
-  static llvm::BranchInst *gen(auto &ctx, const auto &a, const auto &b, const auto &l) {
-    return gen_impl(ctx, LLVMPredT<decltype(ctx)>::ICMP_EQ, a, b, l);
-  }
+struct inst_jmpeqi : inst_jmp_cmp <inst_jmpeqi, std::equal_to<>,    0x03, "JMPEQi"_n, reg, imm<intptr_t>, label> {
+  template<typename Ctx> static inline constexpr LLVMPredT<Ctx> llvm_pred = LLVMPredT<Ctx>::ICMP_EQ;
 };
-struct inst_jmplti : inst_jmp_cmp <inst_jmplti, std::less<>,        0x04, "JMPLTi"_n, reg, imm<int32_t>, label> {
-  template<typename = void>
-  static llvm::BranchInst *gen(auto &ctx, const auto &a, const auto &b, const auto &l) {
-    return gen_impl(ctx, LLVMPredT<decltype(ctx)>::ICMP_SLT, a, b, l);
-  }
+struct inst_jmplti : inst_jmp_cmp <inst_jmplti, std::less<>,        0x04, "JMPLTi"_n, reg, imm<intptr_t>, label> {
+  template<typename Ctx> static inline constexpr LLVMPredT<Ctx> llvm_pred = LLVMPredT<Ctx>::ICMP_SLT;
 };
-struct inst_jmpgti : inst_jmp_cmp <inst_jmpgti, std::greater<>,     0x05, "JMPGTi"_n, reg, imm<int32_t>, label> {
-  template<typename = void>
-  static llvm::BranchInst *gen(auto &ctx, const auto &a, const auto &b, const auto &l) {
-    return gen_impl(ctx, LLVMPredT<decltype(ctx)>::ICMP_SGT, a, b, l);
-  }
+struct inst_jmpgti : inst_jmp_cmp <inst_jmpgti, std::greater<>,     0x05, "JMPGTi"_n, reg, imm<intptr_t>, label> {
+  template<typename Ctx> static inline constexpr LLVMPredT<Ctx> llvm_pred = LLVMPredT<Ctx>::ICMP_SGT;
 };
 
 // debug
 struct inst_write : inst_base<inst_write, 0x0F, "WRITE"_n, reg> {
   static void exec(auto &ctx, const auto &a) { std::cout << a << '\n'; }
+  static llvm::Value *gen(auto &ctx, const auto &a) {
+    return ctx.builder.CreateCall(
+        ctx.printf, {ctx.builder.CreateGlobalStringPtr("%d\n"), a.read});
+  }
 };
 
 // arithmetic
 template<typename Derived, uint8_t OpCode, auto Name, typename ...Args>
 struct inst_set_base : inst_base<Derived, OpCode, Name, Args...> {
   static void exec(auto &ctx, auto &a, const auto &b) { a = b; }
+  static llvm::Value *gen(auto &ctx, const auto &a, const auto &b) {
+    return ctx.builder.CreateStore(b.read, a.write);
+  }
 };
 template<typename Derived, typename Op, uint8_t OpCode, auto Name, typename ...Args>
 struct inst_binop_base : inst_base<Derived, OpCode, Name, Args...> {
+  template <typename Ctx>
+  using LLVMBinOpT =
+      sig_nth_arg_t<decltype(&decltype(std::declval<Ctx>().builder)::CreateBinOp),
+                    0>;
+
   static void exec(auto &ctx, auto &a, const auto &b, const auto &c) { a = Op{}(b, c); }
+  static llvm::Value *gen(auto &ctx, const auto &a, const auto &b, const auto &c) {
+    return ctx.builder.CreateStore(
+        ctx.builder.CreateBinOp(Derived::template llvm_op<decltype(ctx)>,
+                                b.read, c.read),
+        a.write);
+  }
+};
+template<typename Derived, typename Op, uint8_t OpCode, auto Name, typename ...Args>
+struct inst_cmp_base : inst_base<Derived, OpCode, Name, Args...> {
+  template <typename Ctx>
+  using LLVMPredT =
+      sig_nth_arg_t<decltype(&decltype(std::declval<Ctx>().builder)::CreateICmp),
+                    0>;
+
+  static void exec(auto &ctx, auto &a, const auto &b, const auto &c) { a = Op{}(b, c); }
+  static llvm::Value *gen(auto &ctx, const auto &a, const auto &b, const auto &c) {
+    return ctx.builder.CreateStore(
+        ctx.builder.CreateZExt(
+            ctx.builder.CreateICmp(Derived::template llvm_pred<decltype(ctx)>,
+                                   a.read, b.read),
+            ctx.builder.getInt32Ty()),
+        a.write);
+  }
 };
 template<typename Derived, uint8_t OpCode, auto Name, typename ...Args>
 struct inst_muladd_base : inst_base<Derived, OpCode, Name, Args...> {
   static void exec(auto &ctx, auto &a, const auto &b, const auto &c, const auto &d) { a = b + c * d; }
+  static llvm::Value *gen(auto &ctx, const auto &a, const auto &b, const auto &c, const auto &d) {
+    return ctx.builder.CreateStore(
+        ctx.builder.CreateAdd(b.read, ctx.builder.CreateMul(c.read, d.read)),
+        a.write);
+  }
 };
 
 struct binary_shift_left {
@@ -132,49 +162,105 @@ struct binary_shift_left {
   }
 };
 
-struct inst_seti : inst_set_base<      inst_seti,                    0x10, "SETi"_n,    reg, imm<int32_t>> {};
-struct inst_addi : inst_binop_base<    inst_addi, std::plus<>,       0x11, "ADDi"_n,    reg, reg, imm<int32_t>> {};
-struct inst_muli : inst_binop_base<    inst_muli, std::multiplies<>, 0x12, "MULi"_n,    reg, reg, imm<int32_t>> {};
-struct inst_divi : inst_binop_base<    inst_divi, std::divides<>,    0x13, "DIVi"_n,    reg, reg, imm<int32_t>> {};
-struct inst_remi : inst_binop_base<    inst_remi, std::modulus<>,    0x14, "REMi"_n,    reg, reg, imm<int32_t>> {};
-struct inst_shli : inst_binop_base<    inst_shli, binary_shift_left, 0x15, "SHLi"_n,    reg, reg, imm<int32_t>> {};
-struct inst_ceqi : inst_binop_base<    inst_ceqi, std::equal_to<>,   0x16, "CEQi"_n,    reg, reg, imm<int32_t>> {};
-struct inst_clti : inst_binop_base<    inst_clti, std::less<>,       0x17, "CLTi"_n,    reg, reg, imm<int32_t>> {};
-struct inst_cgti : inst_binop_base<    inst_cgti, std::greater<>,    0x18, "CGTi"_n,    reg, reg, imm<int32_t>> {};
-struct inst_muladdi : inst_muladd_base<inst_muladdi,                 0x19, "MULADDi"_n, reg, reg, reg, imm<int32_t>> {};
+struct inst_seti : inst_set_base<      inst_seti,                    0x10, "SETi"_n,    reg, imm<intptr_t>> {};
+struct inst_addi : inst_binop_base<    inst_addi, std::plus<>,       0x11, "ADDi"_n,    reg, reg, imm<intptr_t>> {
+  template<typename Ctx> static inline constexpr LLVMBinOpT<Ctx> llvm_op = LLVMBinOpT<Ctx>::Add;
+};
+struct inst_muli : inst_binop_base<    inst_muli, std::multiplies<>, 0x12, "MULi"_n,    reg, reg, imm<intptr_t>> {
+  template<typename Ctx> static inline constexpr LLVMBinOpT<Ctx> llvm_op = LLVMBinOpT<Ctx>::Mul;
+};
+struct inst_divi : inst_binop_base<    inst_divi, std::divides<>,    0x13, "DIVi"_n,    reg, reg, imm<intptr_t>> {
+  template<typename Ctx> static inline constexpr LLVMBinOpT<Ctx> llvm_op = LLVMBinOpT<Ctx>::SDiv;
+};
+struct inst_remi : inst_binop_base<    inst_remi, std::modulus<>,    0x14, "REMi"_n,    reg, reg, imm<intptr_t>> {
+  template<typename Ctx> static inline constexpr LLVMBinOpT<Ctx> llvm_op = LLVMBinOpT<Ctx>::SRem;
+};
+struct inst_shli : inst_binop_base<    inst_shli, binary_shift_left, 0x15, "SHLi"_n,    reg, reg, imm<intptr_t>> {
+  template<typename Ctx> static inline constexpr LLVMBinOpT<Ctx> llvm_op = LLVMBinOpT<Ctx>::Shl;
+};
+struct inst_ceqi : inst_cmp_base<    inst_ceqi, std::equal_to<>,     0x16, "CEQi"_n,    reg, reg, imm<intptr_t>> {
+  template<typename Ctx> static inline constexpr LLVMPredT<Ctx> llvm_pred = LLVMPredT<Ctx>::ICMP_EQ;
+};
+struct inst_clti : inst_cmp_base<    inst_clti, std::less<>,         0x17, "CLTi"_n,    reg, reg, imm<intptr_t>> {
+  template<typename Ctx> static inline constexpr LLVMPredT<Ctx> llvm_pred = LLVMPredT<Ctx>::ICMP_SLT;
+};
+struct inst_cgti : inst_cmp_base<    inst_cgti, std::greater<>,      0x18, "CGTi"_n,    reg, reg, imm<intptr_t>> {
+  template<typename Ctx> static inline constexpr LLVMPredT<Ctx> llvm_pred = LLVMPredT<Ctx>::ICMP_SGT;
+};
+struct inst_muladdi : inst_muladd_base<inst_muladdi,                 0x19, "MULADDi"_n, reg, reg, reg, imm<intptr_t>> {};
 
 struct inst_set : inst_set_base<      inst_set,                    0x20, "SET"_n,    reg, reg> {};
-struct inst_add : inst_binop_base<    inst_add, std::plus<>,       0x21, "ADD"_n,    reg, reg, reg> {};
-struct inst_mul : inst_binop_base<    inst_mul, std::multiplies<>, 0x22, "MUL"_n,    reg, reg, reg> {};
-struct inst_div : inst_binop_base<    inst_div, std::divides<>,    0x23, "DIV"_n,    reg, reg, reg> {};
-struct inst_rem : inst_binop_base<    inst_rem, std::modulus<>,    0x24, "REM"_n,    reg, reg, reg> {};
-struct inst_shl : inst_binop_base<    inst_shl, binary_shift_left, 0x25, "SHL"_n,    reg, reg, reg> {};
-struct inst_ceq : inst_binop_base<    inst_ceq, std::equal_to<>,   0x26, "CEQ"_n,    reg, reg, reg> {};
-struct inst_clt : inst_binop_base<    inst_clt, std::less<>,       0x27, "CLT"_n,    reg, reg, reg> {};
-struct inst_cgt : inst_binop_base<    inst_cgt, std::greater<>,    0x28, "CGT"_n,    reg, reg, reg> {};
+struct inst_add : inst_binop_base<    inst_add, std::plus<>,       0x21, "ADD"_n,    reg, reg, reg> {
+  template<typename Ctx> static inline constexpr LLVMBinOpT<Ctx> llvm_op = LLVMBinOpT<Ctx>::Add;
+};
+struct inst_mul : inst_binop_base<    inst_mul, std::multiplies<>, 0x22, "MUL"_n,    reg, reg, reg> {
+  template<typename Ctx> static inline constexpr LLVMBinOpT<Ctx> llvm_op = LLVMBinOpT<Ctx>::Mul;
+};
+struct inst_div : inst_binop_base<    inst_div, std::divides<>,    0x23, "DIV"_n,    reg, reg, reg> {
+  template<typename Ctx> static inline constexpr LLVMBinOpT<Ctx> llvm_op = LLVMBinOpT<Ctx>::SDiv;
+};
+struct inst_rem : inst_binop_base<    inst_rem, std::modulus<>,    0x24, "REM"_n,    reg, reg, reg> {
+  template<typename Ctx> static inline constexpr LLVMBinOpT<Ctx> llvm_op = LLVMBinOpT<Ctx>::SRem;
+};
+struct inst_shl : inst_binop_base<    inst_shl, binary_shift_left, 0x25, "SHL"_n,    reg, reg, reg> {
+  template<typename Ctx> static inline constexpr LLVMBinOpT<Ctx> llvm_op = LLVMBinOpT<Ctx>::Shl;
+};
+struct inst_ceq : inst_cmp_base<    inst_ceq, std::equal_to<>,     0x26, "CEQ"_n,    reg, reg, reg> {
+  template<typename Ctx> static inline constexpr LLVMPredT<Ctx> llvm_pred = LLVMPredT<Ctx>::ICMP_EQ;
+};
+struct inst_clt : inst_cmp_base<    inst_clt, std::less<>,         0x27, "CLT"_n,    reg, reg, reg> {
+  template<typename Ctx> static inline constexpr LLVMPredT<Ctx> llvm_pred = LLVMPredT<Ctx>::ICMP_SLT;
+};
+struct inst_cgt : inst_cmp_base<    inst_cgt, std::greater<>,      0x28, "CGT"_n,    reg, reg, reg> {
+  template<typename Ctx> static inline constexpr LLVMPredT<Ctx> llvm_pred = LLVMPredT<Ctx>::ICMP_SGT;
+};
 struct inst_muladd : inst_muladd_base<inst_muladd,                 0x29, "MULADD"_n, reg, reg, reg, reg> {};
 
 // stack & memory
-struct inst_alloca : inst_base<inst_alloca, 0x30, "ALLOCA"_n, reg, imm<uint32_t>> {
+struct inst_alloca : inst_base<inst_alloca, 0x30, "ALLOCA"_n, reg, imm<uintptr_t>> {
   static void exec(auto &ctx, auto &a, const auto &b) { a = ctx.alloc(b); }
+  static llvm::Value *gen(auto &ctx, const auto &a, const auto &b) {
+    return ctx.builder.CreateStore(
+        ctx.builder.CreateAlloca(ctx.builder.getInt8Ty(), b.read), a.write);
+  }
 };
 
-struct inst_storei : inst_set_base<inst_storei, 0x32, "STOREi"_n, reg_ptr, imm<int32_t>> {};
+struct inst_storei : inst_set_base<inst_storei, 0x32, "STOREi"_n, reg_ptr, imm<intptr_t>> {};
 struct inst_store : inst_set_base<inst_store, 0x33, "STORE"_n, reg_ptr, reg> {};
 struct inst_load : inst_set_base<inst_load, 0x34, "LOAD"_n, reg, reg_ptr> {};
 
 // sim
 struct inst_sim_rand : inst_base<inst_sim_rand, 0x40, "SIM_RAND"_n, reg> {
   static void exec(auto &ctx, auto &a) { a = ctx.simRand(); }
+  static llvm::Value *gen(auto &ctx, const auto &a) {
+    return ctx.builder.CreateStore(
+        ctx.builder.CreateSExt(ctx.builder.CreateCall(ctx.simRand, {}),
+                               ctx.reg_type),
+        a.write);
+  }
 };
 struct inst_sim_flush : inst_base<inst_sim_flush, 0x41, "SIM_FLUSH"_n> {
   static void exec(auto &ctx) { ctx.simFlush(); }
+  static llvm::Value *gen(auto &ctx) {
+    return ctx.builder.CreateCall(ctx.simFlush, {});
+  }
 };
 struct inst_sim_put_pixel : inst_base<inst_sim_put_pixel, 0x42, "SIM_PUT_PIXEL"_n, reg, reg, reg> {
   static void exec(auto &ctx, const auto &x, const auto &y, const auto &c) { ctx.simPutPixel(x, y, c); }
+  static llvm::Value *gen(auto &ctx, const auto &x, const auto &y, const auto &c) {
+    return ctx.builder.CreateCall(
+        ctx.simPutPixel,
+        {ctx.builder.CreateTrunc(x.read, ctx.builder.getInt32Ty()),
+         ctx.builder.CreateTrunc(y.read, ctx.builder.getInt32Ty()),
+         ctx.builder.CreateTrunc(c.read, ctx.builder.getInt32Ty())});
+  }
 };
 struct inst_sim_clear : inst_base<inst_sim_clear, 0x43, "SIM_CLEAR"_n, reg> {
   static void exec(auto &ctx, const auto &c) { ctx.simClear(c); }
+  static llvm::Value *gen(auto &ctx, const auto &c) {
+    return ctx.builder.CreateCall(
+        ctx.simClear, {ctx.builder.CreateTrunc(c.read, ctx.builder.getInt32Ty())});
+  }
 };
 
 // end

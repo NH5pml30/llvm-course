@@ -31,7 +31,7 @@ struct ram_io {
   }
 
   auto read(label) {
-    return read<uint32_t>();
+    return read<uintptr_t>();
   }
 
   template<typename T>
@@ -43,8 +43,8 @@ struct ram_io {
     write<uint8_t>(val);
   }
 
-  void write(uint32_t val, label) {
-    write<uint32_t>(val);
+  void write(uintptr_t val, label) {
+    write<uintptr_t>(val);
   }
 };
 

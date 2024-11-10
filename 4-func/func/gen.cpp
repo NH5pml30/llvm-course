@@ -1,5 +1,3 @@
-
-#include <limits>
 #include <tuple>
 #include <utility>
 
@@ -18,6 +16,7 @@
 
 
 #include "gen.h"
+#include "../util_llvm.h"
 
 extern "C" {
 #include "../sim.h"
@@ -52,75 +51,14 @@ struct InstWithMappedArgs {
     }(std::make_index_sequence<std::tuple_size_v<typename Inst::args_t>>());
   }
 };
-
-template<typename X>
-struct llvm_type;
-
-template<>
-struct llvm_type<unsigned char> {
-  static llvm::Type *get(llvm::LLVMContext &ctx) {
-    return llvm::Type::getInt8Ty(ctx);
-  }
-};
-
-template<>
-struct llvm_type<int32_t> {
-  static llvm::Type *get(llvm::LLVMContext &ctx) {
-    return llvm::Type::getInt32Ty(ctx);
-  }
-};
-
-template<>
-struct llvm_type<uint32_t> {
-  static llvm::Type *get(llvm::LLVMContext &ctx) {
-    return llvm::Type::getInt32Ty(ctx);
-  }
-};
-
-template<>
-struct llvm_type<void> {
-  static llvm::Type *get(llvm::LLVMContext &ctx) {
-    return llvm::Type::getVoidTy(ctx);
-  }
-};
-
-template<typename T>
-struct llvm_type<T *> {
-  static llvm::Type *get(llvm::LLVMContext &ctx) {
-    return llvm::PointerType::get(ctx, 0);
-  }
-};
-
-template<typename T>
-struct llvm_type<T &> {
-  static llvm::Type *get(llvm::LLVMContext &ctx) {
-    return llvm::PointerType::get(ctx, 0);
-  }
-};
-
-template<typename R, typename ...As>
-struct llvm_type<R (As...)> {
-  static llvm::FunctionType *get(llvm::LLVMContext &ctx) {
-    return llvm::FunctionType::get(llvm_type<R>::get(ctx),
-                                   {llvm_type<As>::get(ctx)...}, false);
-  }
-};
-
-template<typename T>
-struct llvm_type<T[]> {
-  static llvm::ArrayType *get(llvm::LLVMContext &ctx, size_t N) {
-    return llvm::ArrayType::get(llvm_type<T>::get(ctx), N);
-  }
-};
-
 struct gen_func_writer {
   llvm::IRBuilder<> &builder;
   std::vector<llvm::Value *> args;
-  std::map<std::string, std::pair<uint32_t, llvm::BasicBlock *>> BBs;
+  std::map<std::string, std::pair<uintptr_t, llvm::BasicBlock *>> BBs;
 
   template<typename T>
   void write(T val) {
-    args.push_back(builder.getIntN(CHAR_BIT * sizeof(T), val));
+    args.push_back(value_from_int(builder, val));
   }
 
   template<typename T>
@@ -131,17 +69,6 @@ struct gen_func_writer {
   void write(uint8_t val, reg) {
     write<uint8_t>(val);
   }
-
-  /*void write(const std::string &val, label) {
-    uint32_t id{};
-    if (auto place = BBs.find(val); place != BBs.end()) {
-      id = place->second.first;
-    } else {
-      id = (uint32_t)BBs.size();
-      BBs[val] = {id, nullptr};
-    }
-    write<uint32_t>(id);
-  }*/
 };
 
 struct gen_full_reader : assembler_reader {
@@ -155,21 +82,33 @@ struct gen_full_reader : assembler_reader {
     llvm::Value *write;
   };
 
+  template<typename T>
+  struct const_proxy : proxy {
+    T value;
+  };
+
   using assembler_reader::read;
   template<typename T>
   auto read(imm<T>) {
-    auto *val = builder.getIntN(CHAR_BIT * sizeof(T), assembler_reader::read(imm<T>{}));
-    return proxy{val, nullptr};
+    T value = assembler_reader::read(imm<T>{});
+    auto *val = value_from_int(builder, value);
+    return const_proxy<T>{val, nullptr, value};
   }
   auto read(reg) {
-    auto *val = builder.CreateConstGEP2_32(reg_file->getValueType(), reg_file, 0,
-                                      assembler_reader::read(reg{}));
-    return proxy{builder.CreateLoad(builder.getInt32Ty(), val), val};
+    auto *val = builder.CreateConstGEP2_64(reg_file->getValueType(), reg_file,
+                                           0, assembler_reader::read(reg{}));
+    return proxy{
+        builder.CreateLoad(llvm_type<intptr_t>::get(builder.getContext()), val),
+        val
+    };
   }
   auto read(reg_ptr) {
     auto *val = builder.CreateGEP(stack_mem->getValueType(), stack_mem,
-                                  {builder.getInt32(0), read(reg{}).read});
-    return proxy{builder.CreateLoad(builder.getInt32Ty(), val), val};
+                                  {builder.getInt64(0), read(reg{}).read});
+    return proxy{
+        builder.CreateLoad(llvm_type<intptr_t>::get(builder.getContext()), val),
+        val
+    };
   }
 };
 
@@ -192,7 +131,7 @@ llvm::BasicBlock *gen::create_bb(const std::string &name) {
   } else {
     BB = llvm::BasicBlock::Create(context, name, main_func);
   }
-  BBs[name] = {(uint32_t)BBs.size(), BB};
+  BBs[name] = {BBs.size(), BB};
   if (old_BB && !old_BB->getTerminator())
     builder.CreateBr(BB);
   builder.SetInsertPoint(BB);
@@ -205,15 +144,14 @@ void gen::run(std::istream &i) {
   module->getOrInsertGlobal("runtime_context", llvm_type<void *>::get(context));
   runtime_context = module->getNamedGlobal("runtime_context");
 
-  module->getOrInsertGlobal("reg_file", llvm_type<int32_t[]>::get(context, memory::REG_SIZE));
+  module->getOrInsertGlobal("reg_file", llvm_type<intptr_t[]>::get(context, memory::REG_SIZE));
   reg_file = module->getNamedGlobal("reg_file");
 
   module->getOrInsertGlobal("stack_mem", llvm_type<unsigned char[]>::get(context, memory::STACK_SIZE));
   stack_mem = module->getNamedGlobal("stack_mem");
 
-  module->getOrInsertGlobal("stack", llvm_type<uint32_t>::get(context));
+  module->getOrInsertGlobal("stack", llvm_type<size_t>::get(context));
   stack = module->getNamedGlobal("stack");
-  stack->setInitializer(builder.getInt32(memory::STACK_SIZE));
 
   llvm::FunctionType *main_type = llvm_type<void()>::get(context);
   main_func = llvm::Function::Create(main_type, llvm::Function::ExternalLinkage,
