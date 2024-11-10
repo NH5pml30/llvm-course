@@ -4,26 +4,26 @@ extern "C" {
 #include "sim.h"
 }
 
-uintptr_t memory::alloc(size_t sz) {
+uintptr_t ctx_regs_stack::alloc(size_t sz) {
   return stack -= sz;
 }
 
-intptr_t &memory::deref(uintptr_t addr) {
+intptr_t &ctx_regs_stack::deref(uintptr_t addr) {
   return *(intptr_t *)&stack_mem[addr];
 }
 
-int memory::simRand() {
+int ctx_regs::simRand() {
   return ::simRand();
 }
 
-void memory::simFlush() {
+void ctx_regs::simFlush() {
   return ::simFlush();
 }
 
-void memory::simPutPixel(int x, int y, int c) {
+void ctx_regs::simPutPixel(int x, int y, int c) {
   return ::simPutPixel(x, y, c);
 }
 
-void memory::simClear(int c) {
+void ctx_regs::simClear(int c) {
   return ::simClear(c);
 }

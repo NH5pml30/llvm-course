@@ -5,7 +5,7 @@
 #include <iostream>
 #include <istream>
 
-struct ram_io {
+struct byte_io {
   unsigned char *mem;
 
   template<typename T>

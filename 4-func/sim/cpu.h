@@ -2,7 +2,7 @@
 
 #include "../memory.h"
 
-struct CPU : memory {
+struct CPU : ctx_regs_stack {
   static constexpr size_t CODE_SIZE = 2048;
   uintptr_t PC = 0;
   unsigned char code[CODE_SIZE] = {};

@@ -16,7 +16,7 @@ void CPU::stop() {
 
 void CPU::step() {
   //std::cout << "inst: " << #name << "\n";
-  memory_reader reader{&code[PC], *this};
+  regs_stack_reader reader{&code[PC], *this};
   unsigned char op = reader.read<unsigned char>();
   find_inst([op]<typename Inst>(Inst) { return Inst::op_code == op; },
             [&]<typename Inst>(Inst) {

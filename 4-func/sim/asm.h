@@ -15,10 +15,10 @@ public:
   std::vector<unsigned char> run() &&;
 
 private:
-  struct assembler_writer : public ram_io {
+  struct assembler_writer : public byte_io {
     std::map<unsigned char *, std::string> fixup_labels;
 
-    using ram_io::write;
+    using byte_io::write;
     void write(const std::string &val, label);
     void write(int val, reg);
   };

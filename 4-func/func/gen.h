@@ -13,7 +13,7 @@
 class gen {
 public:
   void run(std::istream &i);
-  void executeIR(memory &cpu);
+  void executeIR(ctx_regs_stack &cpu);
 
   llvm::LLVMContext context;
   llvm::Module *module{};

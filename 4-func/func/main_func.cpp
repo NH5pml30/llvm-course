@@ -22,7 +22,7 @@ start:
   gen g;
   g.run(in);
 
-  memory mem;
+  ctx_regs_stack mem;
   g.executeIR(mem);
 
   return 0;

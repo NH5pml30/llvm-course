@@ -26,21 +26,21 @@ extern "C" {
 template<typename Inst>
 struct InstWithMappedArgs {
   template<size_t I>
-  using arg_i_t = arg_repr_t<ram_io, std::tuple_element_t<I, typename Inst::args_t>>;
+  using arg_i_t = arg_repr_t<byte_io, std::tuple_element_t<I, typename Inst::args_t>>;
 
-  using FuncT = decltype(read_args_storage(std::declval<ram_io &>(),
-                                           typename Inst::args_t{}))::template FuncT<memory>;
+  using FuncT = decltype(read_args_storage(std::declval<byte_io &>(),
+                                           typename Inst::args_t{}))::template FuncT<ctx_regs_stack>;
 
   template<size_t I>
-  static decltype(auto) map_arg(memory &ctx, arg_i_t<I> arg) {
+  static decltype(auto) map_arg(ctx_regs_stack &ctx, arg_i_t<I> arg) {
     using tag_t = std::tuple_element_t<I, typename Inst::args_t>;
-    memory_reader reader{(unsigned char *)&arg, ctx};
+    regs_stack_reader reader{(unsigned char *)&arg, ctx};
     return reader.read(tag_t{});
   }
 
   template<typename ...Ts>
-  static void exec(memory &ctx, Ts... args) {
-    []<size_t ...Is>(memory &ctx, Ts... args, std::index_sequence<Is...>) {
+  static void exec(ctx_regs_stack &ctx, Ts... args) {
+    []<size_t ...Is>(ctx_regs_stack &ctx, Ts... args, std::index_sequence<Is...>) {
       Inst::exec(ctx, map_arg<Is>(ctx, args)...);
     }(ctx, args..., std::make_index_sequence<sizeof...(args)>());
   }
@@ -144,10 +144,10 @@ void gen::run(std::istream &i) {
   module->getOrInsertGlobal("runtime_context", llvm_type<void *>::get(context));
   runtime_context = module->getNamedGlobal("runtime_context");
 
-  module->getOrInsertGlobal("reg_file", llvm_type<intptr_t[]>::get(context, memory::REG_SIZE));
+  module->getOrInsertGlobal("reg_file", llvm_type<intptr_t[]>::get(context, ctx_regs_stack::REG_SIZE));
   reg_file = module->getNamedGlobal("reg_file");
 
-  module->getOrInsertGlobal("stack_mem", llvm_type<unsigned char[]>::get(context, memory::STACK_SIZE));
+  module->getOrInsertGlobal("stack_mem", llvm_type<unsigned char[]>::get(context, ctx_regs_stack::STACK_SIZE));
   stack_mem = module->getNamedGlobal("stack_mem");
 
   module->getOrInsertGlobal("stack", llvm_type<size_t>::get(context));
@@ -220,7 +220,7 @@ void gen::run(std::istream &i) {
   std::cout << "[VERIFICATION] " << (!verif ? "OK\n\n" : "FAIL\n\n");
 }
 
-void gen::executeIR(memory &cpu) {
+void gen::executeIR(ctx_regs_stack &cpu) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
 

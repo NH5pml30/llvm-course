@@ -84,7 +84,7 @@ llvm::BasicBlock *gen::create_bb(const std::string &name) {
 void gen::run(std::istream &i) {
   module = new llvm::Module("top", context);
 
-  module->getOrInsertGlobal("reg_file", llvm_type<intptr_t[]>::get(context, memory::REG_SIZE));
+  module->getOrInsertGlobal("reg_file", llvm_type<intptr_t[]>::get(context, ctx_regs_stack::REG_SIZE));
   reg_file = module->getNamedGlobal("reg_file");
 
   llvm::FunctionType *main_type = llvm_type<void()>::get(context);
@@ -154,7 +154,7 @@ void gen::run(std::istream &i) {
   std::cout << "[VERIFICATION] " << (!verif ? "OK\n\n" : "FAIL\n\n");
 }
 
-void gen::executeIR(memory &cpu) {
+void gen::executeIR(ctx_regs &cpu) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
 

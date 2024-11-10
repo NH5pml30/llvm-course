@@ -7,11 +7,11 @@ assembler::assembler(std::istream &i) : i(i) {}
 
 void assembler::assembler_writer::write(const std::string &val, label) {
   fixup_labels[mem] = val;
-  ram_io::write(uintptr_t{0}, label{});
+  byte_io::write(uintptr_t{0}, label{});
 }
 
 void assembler::assembler_writer::write(int val, reg) {
-  ram_io::write((uint8_t)val, reg{});
+  byte_io::write((uint8_t)val, reg{});
 }
 
 bool assembler::one() {
@@ -54,7 +54,7 @@ std::vector<unsigned char> assembler::run() && {
 
   for (auto &&[at, label] : writer.fixup_labels) {
     writer.mem = at;
-    writer.ram_io::write(label2offset[label]);
+    writer.byte_io::write(label2offset[label]);
   }
 
   return std::move(mem);
