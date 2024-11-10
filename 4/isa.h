@@ -8,22 +8,9 @@
 
 #include "util.h"
 
-template <std::size_t N> struct make_array {
-  std::array<char, N> data;
-
-  template <std::size_t... Is>
-  constexpr make_array(const char (&arr)[N],
-                      std::integer_sequence<std::size_t, Is...>)
-      : data{arr[Is]...} {}
-
-  constexpr make_array(char const (&arr)[N])
-      : make_array(arr, std::make_integer_sequence<std::size_t, N>()) {}
-};
-
-template <make_array A> constexpr auto operator"" _n() { return A.data; }
-
-template<uint8_t OpCode, typename = void>
-struct inst_checker {
+// this is needed to create a compile-time map from OpCode to Inst for all
+// inst_base<Inst, OpCode, ...> instantiations
+template <uint8_t OpCode, typename = void> struct inst_checker {
   friend auto adl_lookup(inst_checker<OpCode>);
 };
 
@@ -42,12 +29,12 @@ struct inst_base {
 
 // begin
 
+// don't include llvm headers here, so that `sim` folder can compile
 namespace llvm {
-  class ReturnInst;
-  class BranchInst;
-  class CmpInst;
-  class Value;
-}
+class ReturnInst;
+class BranchInst;
+class Value;
+} // namespace llvm
 
 // control flow
 template<typename Derived, uint8_t OpCode, auto Name, typename ...Args>
@@ -266,6 +253,7 @@ struct inst_sim_clear : inst_base<inst_sim_clear, 0x43, "SIM_CLEAR"_n, reg> {
 
 // end
 
+// define the OpCode -> Inst compile-time map
 template<uint8_t OpCode, typename = void>
 struct op_code2inst {
   using type = void;
@@ -293,6 +281,7 @@ constexpr auto inst_enum() {
   }
 }
 
+// tuple with all instruction types (currently unused)
 using inst_enum_t = decltype(inst_enum<255>());
 
 template<typename R = void, uint8_t OpCode = 255>

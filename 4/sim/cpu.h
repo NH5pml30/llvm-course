@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../memory.h"
+#include "../contexts.h"
 
 struct CPU : ctx_regs_stack {
   static constexpr size_t CODE_SIZE = 2048;

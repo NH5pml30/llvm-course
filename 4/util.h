@@ -5,23 +5,28 @@
 #include <tuple>
 #include <utility>
 
+// types for instruction arguments & registers
 using word_t = uintptr_t;
 using sword_t = std::make_signed_t<word_t>;
 
+// argument tags
 template<typename T>
-struct imm {};
-struct reg {};
-struct label {};
-struct reg_ptr : reg {};
+struct imm {};           // immediate argument
+struct reg {};           // register argument
+struct label {};         // label argument
+struct reg_ptr : reg {}; // dereferenced register with a (stack memory) pointer argument
 
+// type to store argument pack
 template<typename ...Args>
 using args = std::tuple<Args...>;
 
-template<typename ReaderT, typename ...Args>
-struct args_storage;
-
+// map argument tag to concrete argument type
 template<typename ReaderT, typename Arg>
 using arg_repr_t = decltype(std::declval<ReaderT>().read(Arg{}));
+
+// type to store concrete argument types in a tuple
+template<typename ReaderT, typename ...Args>
+struct args_storage;
 
 template <typename ReaderT, typename Arg, typename... Args>
 struct args_storage<ReaderT, Arg, Args...>
@@ -94,6 +99,7 @@ auto read_args_storage(ReaderT &reader, args<Args...>) {
   return args_storage<ReaderT, Args...>::read(reader);
 }
 
+// types to extract nth argument from a function pointer signature
 template<typename T>
 struct signature;
 
@@ -109,3 +115,18 @@ struct signature<R (Cls::*)(Args...)> {
 
 template<typename T, size_t I>
 using sig_nth_arg_t = std::tuple_element_t<I, typename signature<T>::type>;
+
+// type to pass strings as template arguments
+template <std::size_t N> struct make_array {
+  std::array<char, N> data;
+
+  template <std::size_t... Is>
+  constexpr make_array(const char (&arr)[N],
+                      std::integer_sequence<std::size_t, Is...>)
+      : data{arr[Is]...} {}
+
+  constexpr make_array(char const (&arr)[N])
+      : make_array(arr, std::make_integer_sequence<std::size_t, N>()) {}
+};
+
+template <make_array A> constexpr auto operator"" _n() { return A.data; }

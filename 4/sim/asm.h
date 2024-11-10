@@ -15,6 +15,7 @@ public:
   std::vector<unsigned char> run() &&;
 
 private:
+  // struct to reserve memory for labels and remember those locations
   struct assembler_writer : public byte_io {
     std::map<unsigned char *, std::string> fixup_labels;
 

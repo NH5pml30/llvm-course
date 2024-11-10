@@ -26,6 +26,8 @@ struct gen_full_reader : assembler_reader {
   llvm::IRBuilder<> &builder;
   llvm::GlobalVariable *reg_file;
 
+  // this in used in `gen` in isa.h instead of implicit operations on argument
+  // references in `exec`
   struct proxy {
     llvm::Value *read;
     llvm::Value *write;
@@ -47,6 +49,7 @@ struct gen_full_reader : assembler_reader {
     };
   }
   auto read(reg_ptr) {
+    // here, stack pointers are actual pointers
     auto *ptr = builder.CreateLoad(llvm_type<void *>::get(builder.getContext()),
                                    read(reg{}).write);
     return proxy{
@@ -68,10 +71,12 @@ std::string gen::split_bb() {
 llvm::BasicBlock *gen::create_bb(const std::string &name) {
   llvm::BasicBlock *old_BB = builder.GetInsertBlock(), *BB = nullptr;
   if (old_BB && old_BB->empty()) {
+    // reuse old empty block, if we created one before
     BB = old_BB;
     old_BB = nullptr;
     BB->setName(name);
   } else {
+    // create new
     BB = llvm::BasicBlock::Create(context, name, main_func);
   }
   BBs[name] = {BBs.size(), BB};
@@ -143,9 +148,11 @@ void gen::run(std::istream &i) {
     }
   }
 
+  // resolve basic block names
   for (auto &&[iter, label] : fixup_labels)
     iter->set(BBs[label].second);
 
+  // eliminate unreachable empty end block, if present
   llvm::EliminateUnreachableBlocks(*main_func);
 
   module->print(llvm::outs(), nullptr);
@@ -161,6 +168,7 @@ void gen::executeIR(ctx_regs &cpu) {
   llvm::ExecutionEngine *ee =
       llvm::EngineBuilder(std::unique_ptr<llvm::Module>(module)).create();
   using namespace std::string_literals;
+  // install only sim functions
   ee->InstallLazyFunctionCreator([=](const std::string &fn_name) -> void * {
     if (fn_name == "simFlush")
       return reinterpret_cast<void *>(::simFlush);
@@ -173,6 +181,7 @@ void gen::executeIR(ctx_regs &cpu) {
     return nullptr;
   });
 
+  // simulate reg_file
   ee->addGlobalMapping(reg_file, (void *)cpu.reg_file);
   ee->finalizeObject();
 

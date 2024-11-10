@@ -47,11 +47,13 @@ bool assembler::one() {
 }
 
 std::vector<unsigned char> assembler::run() && {
+  // read insts
   while (one())
     ;
 
   mem.resize(writer.mem - mem.data());
 
+  // resolve labels
   for (auto &&[at, label] : writer.fixup_labels) {
     writer.mem = at;
     writer.byte_io::write(label2offset[label]);

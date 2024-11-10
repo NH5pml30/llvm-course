@@ -23,8 +23,9 @@ extern "C" {
 }
 #include "../isa.h"
 
-template<typename Inst>
-struct InstWithMappedArgs {
+// struct to generate instruction exec (do_...) wrappers which perform argument
+// semantics (register reading, pointer dereferencing)
+template <typename Inst> struct InstWithMappedArgs {
   template<size_t I>
   using arg_i_t = arg_repr_t<byte_io, std::tuple_element_t<I, typename Inst::args_t>>;
 
@@ -54,7 +55,6 @@ struct InstWithMappedArgs {
 struct gen_func_writer {
   llvm::IRBuilder<> &builder;
   std::vector<llvm::Value *> args;
-  std::map<std::string, std::pair<word_t, llvm::BasicBlock *>> BBs;
 
   template<typename T>
   void write(T val) {
@@ -77,14 +77,11 @@ struct gen_full_reader : assembler_reader {
   llvm::GlobalVariable *stack_mem;
   llvm::GlobalVariable *stack;
 
+  // this in used in `gen` in isa.h instead of implicit operations on argument
+  // references in `exec`
   struct proxy {
     llvm::Value *read;
     llvm::Value *write;
-  };
-
-  template<typename T>
-  struct const_proxy : proxy {
-    T value;
   };
 
   using assembler_reader::read;
@@ -92,7 +89,7 @@ struct gen_full_reader : assembler_reader {
   auto read(imm<T>) {
     T value = assembler_reader::read(imm<T>{});
     auto *val = value_from_int(builder, value);
-    return const_proxy<T>{val, nullptr, value};
+    return proxy{val, nullptr};
   }
   auto read(reg) {
     auto *val = builder.CreateConstGEP2_64(reg_file->getValueType(), reg_file,
@@ -103,6 +100,7 @@ struct gen_full_reader : assembler_reader {
     };
   }
   auto read(reg_ptr) {
+    // here, stack pointers are just offsets into our stack_mem
     auto *val = builder.CreateGEP(stack_mem->getValueType(), stack_mem,
                                   {builder.getInt64(0), read(reg{}).read});
     return proxy{
@@ -178,6 +176,7 @@ void gen::run(std::istream &i) {
       [&inst]<typename Inst>(Inst) { return Inst::name == inst; },
       [&]<typename Inst>(Inst) {
         if constexpr (is_control_flow(Inst{})) {
+          // control flow: generate full IR
           gen_full_reader reader{i, builder, reg_file, stack_mem, stack};
           auto arg_values = read_args_storage(reader, typename Inst::args_t{});
           std::apply(
@@ -187,6 +186,7 @@ void gen::run(std::istream &i) {
               std::tuple_cat(std::tuple<gen &>(*this), arg_values.tuple()));
           return true;
         } else {
+          // non-control-flow: generate a call to our instruction wrapper
           assembler_reader reader{i};
           gen_func_writer writer{builder};
           writer.args.push_back(ctx_arg);
@@ -209,6 +209,7 @@ void gen::run(std::istream &i) {
     }
   }
 
+  // resolve basic block names
   for (auto &&[iter, label] : fixup_labels)
     iter->set(BBs[label].second);
 
@@ -227,6 +228,7 @@ void gen::executeIR(ctx_regs_stack &cpu) {
   llvm::ExecutionEngine *ee =
       llvm::EngineBuilder(std::unique_ptr<llvm::Module>(module)).create();
   using namespace std::string_literals;
+  // install our instruction wrappers
   ee->InstallLazyFunctionCreator([=](const std::string &fn_name) -> void * {
     return find_inst<void *>(
         [&]<typename Inst>(Inst) { return fn_name == "do_"s + Inst::name; },
