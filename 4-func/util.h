@@ -1,25 +1,19 @@
 #pragma once
 
-#include <istream>
-#include <iostream>
-#include <limits>
+#include <cstddef>
+#include <cstdint>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
 template<typename T>
 struct imm {};
-
 struct reg {};
-
 struct label {};
+struct reg_ptr : reg {};
 
 template<typename ...Args>
-struct args {};
-
-template<typename Arg, typename ...Args>
-struct args<Arg, Args...> : args<Args...> {
-  using type = Arg;
-};
+using args = std::tuple<Args...>;
 
 template<typename ReaderT, typename ...Args>
 struct args_storage;
@@ -33,8 +27,8 @@ struct args_storage<ReaderT, Arg, Args...>
   using ArgsTupleT = std::tuple<Arg, Args...>;
   using BaseT =
       std::tuple<arg_repr_t<ReaderT, Arg>, arg_repr_t<ReaderT, Args>...>;
-  template<typename CtxT>
-  using FuncT = void(CtxT &, arg_repr_t<ReaderT, Arg> &&, arg_repr_t<ReaderT, Args> &&...);
+  template<typename Ctx>
+  using FuncT = void(Ctx &, arg_repr_t<ReaderT, Arg>, arg_repr_t<ReaderT, Args>...);
 
   args_storage() = default;
   args_storage(const BaseT &base) : BaseT(base) {}
@@ -72,9 +66,10 @@ struct args_storage<ReaderT, Arg, Args...>
 
 template<typename ReaderT>
 struct args_storage<ReaderT> : std::tuple<> {
+  using ArgsTupleT = std::tuple<>;
   using BaseT = std::tuple<>;
-  template<typename CtxT>
-  using FuncT = void(CtxT &);
+  template<typename Ctx>
+  using FuncT = void(Ctx &);
 
   args_storage() = default;
   args_storage(const BaseT &base) : BaseT(base) {}
@@ -97,6 +92,18 @@ auto read_args_storage(ReaderT &reader, args<Args...>) {
   return args_storage<ReaderT, Args...>::read(reader);
 }
 
-template <typename T> struct argument_type;
-template <typename T, typename... U>
-struct argument_type<T(U...)> : std::type_identity<args<U...>> {};
+template<typename T>
+struct signature;
+
+template<typename R, typename ...Args>
+struct signature<R (Args...)> {
+  using type = std::tuple<Args...>;
+};
+
+template<typename Cls, typename R, typename ...Args>
+struct signature<R (Cls::*)(Args...)> {
+  using type = std::tuple<Args...>;
+};
+
+template<typename T, size_t I>
+using sig_nth_arg_t = std::tuple_element_t<I, typename signature<T>::type>;

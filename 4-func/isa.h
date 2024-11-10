@@ -1,25 +1,26 @@
 #pragma once
 
-#include "util.h"
-#include "cpu.h"
 #include <cstdint>
 #include <functional>
+#include <iostream>
 #include <tuple>
 #include <type_traits>
 
-template <std::size_t N> struct MakeArray {
+#include "util.h"
+
+template <std::size_t N> struct make_array {
   std::array<char, N> data;
 
   template <std::size_t... Is>
-  constexpr MakeArray(const char (&arr)[N],
+  constexpr make_array(const char (&arr)[N],
                       std::integer_sequence<std::size_t, Is...>)
       : data{arr[Is]...} {}
 
-  constexpr MakeArray(char const (&arr)[N])
-      : MakeArray(arr, std::make_integer_sequence<std::size_t, N>()) {}
+  constexpr make_array(char const (&arr)[N])
+      : make_array(arr, std::make_integer_sequence<std::size_t, N>()) {}
 };
 
-template <MakeArray A> constexpr auto operator"" _n() { return A.data; }
+template <make_array A> constexpr auto operator"" _n() { return A.data; }
 
 template<uint8_t OpCode, typename = void>
 struct inst_checker {
@@ -31,6 +32,8 @@ struct inst_base {
   static constexpr uint8_t op_code = OpCode;
   static constexpr const char *name = Name.data();
   using args_t = args<Args...>;
+  template<typename ReaderT>
+    using args_storage_t = args_storage<ReaderT, Args...>;
 
   friend auto adl_lookup(inst_checker<OpCode>) {
     return Derived{};
@@ -38,30 +41,71 @@ struct inst_base {
 };
 
 // begin
+
 // control flow
+namespace llvm {
+  class ReturnInst;
+  class BranchInst;
+  class CmpInst;
+}
+
 template<typename Derived, uint8_t OpCode, auto Name, typename ...Args>
 struct inst_control_flow_base : inst_base<Derived, OpCode, Name, Args...> {};
 
 template<typename Derived, typename PredT, uint8_t OpCode, auto Name, typename ...Args>
-struct inst_jmp_pred : inst_control_flow_base<Derived, OpCode, Name, Args...> {
-  static void exec(auto &ctx, const auto &a, const auto &l) { if (PredT{}(a)) ctx.jump(l); }
-};
-template<typename Derived, typename PredT, uint8_t OpCode, auto Name, typename ...Args>
 struct inst_jmp_cmp : inst_control_flow_base<Derived, OpCode, Name, Args...> {
+  template <typename Ctx>
+  using LLVMPredT =
+      sig_nth_arg_t<decltype(&decltype(std::declval<Ctx>().builder)::CreateICmp),
+                    0>;
+
   static void exec(auto &ctx, const auto &a, const auto &b, const auto &l) { if (PredT{}(a, b)) ctx.jump(l); }
+  static llvm::BranchInst *gen_impl(auto &ctx, LLVMPredT<decltype(ctx)> llvm_pred, const auto &a, const auto &b, const auto &l) {
+    auto *I = ctx.builder.CreateCondBr(
+        ctx.builder.CreateTrunc(
+            ctx.builder.CreateICmp(llvm_pred, a.read, b.read),
+            ctx.builder.getInt1Ty()),
+        ctx.default_dest, ctx.default_dest);
+    ctx.fixup_bb(I->op_begin() + 1, ctx.split_bb());
+    ctx.fixup_bb(I->op_begin() + 2, l);
+    return I;
+  }
 };
 
 struct inst_exit : inst_control_flow_base<inst_exit, 0x01, "EXIT"_n> {
   static void exec(auto &ctx) { ctx.stop(); }
+  static llvm::ReturnInst *gen(auto &ctx) {
+    return ctx.builder.CreateRetVoid();
+  }
 };
 struct inst_jmp : inst_control_flow_base<inst_jmp, 0x02, "JMP"_n, label> {
   static void exec(auto &ctx, const auto &l) { ctx.jump(l); }
+  static llvm::BranchInst *gen(auto &ctx, const auto &l) {
+    auto *I = ctx.builder.CreateBr(ctx.default_dest);
+    ctx.fixup_bb(I->op_begin(), l);
+    ctx.split_bb();
+    return I;
+  }
 };
-struct inst_jmpz   : inst_jmp_pred<inst_jmpz,   std::logical_not<>, 0x03, "JMPZ"_n,   reg, label> {};
-struct inst_jmpnz  : inst_jmp_pred<inst_jmpnz,  std::identity,      0x04, "JMPNZ"_n,  reg, label> {};
-struct inst_jmpeqi : inst_jmp_cmp <inst_jmpeqi, std::equal_to<>,    0x05, "JMPEQi"_n, reg, imm<int32_t>, label> {};
-struct inst_jmplti : inst_jmp_cmp <inst_jmplti, std::less<>,        0x06, "JMPLTi"_n, reg, imm<int32_t>, label> {};
-struct inst_jmpgti : inst_jmp_cmp <inst_jmpgti, std::greater<>,     0x07, "JMPGTi"_n, reg, imm<int32_t>, label> {};
+
+struct inst_jmpeqi : inst_jmp_cmp <inst_jmpeqi, std::equal_to<>,    0x03, "JMPEQi"_n, reg, imm<int32_t>, label> {
+  template<typename = void>
+  static llvm::BranchInst *gen(auto &ctx, const auto &a, const auto &b, const auto &l) {
+    return gen_impl(ctx, LLVMPredT<decltype(ctx)>::ICMP_EQ, a, b, l);
+  }
+};
+struct inst_jmplti : inst_jmp_cmp <inst_jmplti, std::less<>,        0x04, "JMPLTi"_n, reg, imm<int32_t>, label> {
+  template<typename = void>
+  static llvm::BranchInst *gen(auto &ctx, const auto &a, const auto &b, const auto &l) {
+    return gen_impl(ctx, LLVMPredT<decltype(ctx)>::ICMP_SLT, a, b, l);
+  }
+};
+struct inst_jmpgti : inst_jmp_cmp <inst_jmpgti, std::greater<>,     0x05, "JMPGTi"_n, reg, imm<int32_t>, label> {
+  template<typename = void>
+  static llvm::BranchInst *gen(auto &ctx, const auto &a, const auto &b, const auto &l) {
+    return gen_impl(ctx, LLVMPredT<decltype(ctx)>::ICMP_SGT, a, b, l);
+  }
+};
 
 // debug
 struct inst_write : inst_base<inst_write, 0x0F, "WRITE"_n, reg> {
@@ -114,17 +158,12 @@ struct inst_muladd : inst_muladd_base<inst_muladd,                 0x29, "MULADD
 struct inst_alloca : inst_base<inst_alloca, 0x30, "ALLOCA"_n, reg, imm<uint32_t>> {
   static void exec(auto &ctx, auto &a, const auto &b) { a = ctx.alloc(b); }
 };
-template<typename Derived, uint8_t OpCode, auto Name, typename ...Args>
-struct inst_store_base : inst_base<Derived, OpCode, Name, Args...> {
-  static void exec(auto &ctx, const auto &a, const auto &b) { ctx.deref(a) = b; }
-};
 
-struct inst_storei : inst_store_base<inst_storei, 0x32, "STOREi"_n, reg, imm<int32_t>> {};
-struct inst_store : inst_store_base<inst_store, 0x33, "STORE"_n, reg, reg> {};
-struct inst_load : inst_base<inst_load, 0x34, "LOAD"_n, reg, reg> {
-  static void exec(auto &ctx, auto &a, const auto &b) { a = ctx.deref(b); }
-};
+struct inst_storei : inst_set_base<inst_storei, 0x32, "STOREi"_n, reg_ptr, imm<int32_t>> {};
+struct inst_store : inst_set_base<inst_store, 0x33, "STORE"_n, reg_ptr, reg> {};
+struct inst_load : inst_set_base<inst_load, 0x34, "LOAD"_n, reg, reg_ptr> {};
 
+// sim
 struct inst_sim_rand : inst_base<inst_sim_rand, 0x40, "SIM_RAND"_n, reg> {
   static void exec(auto &ctx, auto &a) { a = ctx.simRand(); }
 };
@@ -154,23 +193,20 @@ template<uint8_t OpCode>
 using op_code2inst_t = op_code2inst<OpCode>::type;
 
 template<uint8_t OpCode>
-struct inst_enum {
-  constexpr static auto run() {
+constexpr auto inst_enum() {
+  if constexpr (OpCode == 0) {
+    return std::tuple<>{};
+  } else {
     using cur_type = op_code2inst_t<OpCode>;
     if constexpr (std::is_same_v<cur_type, void>) {
-      return inst_enum<OpCode - 1>::run();
+      return inst_enum<OpCode - 1>();
     } else {
-      return std::tuple_cat(inst_enum<OpCode - 1>::run(), std::make_tuple(cur_type{}));
+      return std::tuple_cat(inst_enum<OpCode - 1>(), std::make_tuple(cur_type{}));
     }
   }
-};
+}
 
-template<>
-struct inst_enum<0> {
-  constexpr static std::tuple<> run() { return {}; }
-};
-
-using inst_enum_t = decltype(inst_enum<255>::run());
+using inst_enum_t = decltype(inst_enum<255>());
 
 template<typename R = void, uint8_t OpCode = 255>
 R find_inst(auto &&Pred, auto &&Action) {
@@ -185,4 +221,13 @@ R find_inst(auto &&Pred, auto &&Action) {
     else
       return find_inst<R, OpCode - 1>(Pred, Action);
   }
+}
+
+template<typename Inst, uint8_t OpCode, auto Name, typename ...Args>
+constexpr bool is_control_flow(inst_control_flow_base<Inst, OpCode, Name, Args...>) {
+  return true;
+}
+
+constexpr bool is_control_flow(...) {
+  return false;
 }

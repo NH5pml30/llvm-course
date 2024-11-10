@@ -4,7 +4,7 @@
 #include <map>
 #include <vector>
 
-#include "../memory_io.h"
+#include "../io.h"
 
 class assembler {
 public:
@@ -15,10 +15,10 @@ public:
   std::vector<unsigned char> run() &&;
 
 private:
-  struct assembler_writer : public memory_io {
-    std::vector<std::pair<std::string, unsigned char *>> fixup_labels;
+  struct assembler_writer : public ram_io {
+    std::map<unsigned char *, std::string> fixup_labels;
 
-    using memory_io::write;
+    using ram_io::write;
     void write(const std::string &val, label);
     void write(int val, reg);
   };

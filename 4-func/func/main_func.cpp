@@ -1,31 +1,29 @@
 #include <fstream>
+#include <sstream>
 
-#include "../cpu.h"
-#include "../util.h"
-
-extern "C" {
-#include "../sim.h"
-}
-
-CPU::memory data;
-
-struct func_reader {
-  template<typename T>
-  T read(imm<T>);
-  int32_t &read(reg);
-  uint32_t read(label);
-};
-
-void stop() {}
-
-uint32_t next_PC;
-
-#include "../isa.h"
+#include "gen.h"
 
 int main() {
   std::ifstream in("../app.s");
+  /*std::string source = R"__delim(
+entry:
+  ALLOCA r0 4
+start:
+  LOAD r1 r0
+  ADDi r1 r1 1
+  STORE r0 r1
+  WRITE r0
+  WRITE r1
+  JMPLTi r1 255 start
+  EXIT
+)__delim";
+  std::stringstream in(source);*/
 
-  // static_assert(std::is_same_v<inst_enum_t, void>);
+  gen g;
+  g.run(in);
+
+  memory mem;
+  g.executeIR(mem);
 
   return 0;
 }

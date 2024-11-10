@@ -37,8 +37,7 @@ update_header:
   LOAD r4 r3
   ADDi r4 r4 -1
   STORE r3 r4
-  CLTi r5 r4 1
-  JMPZ r5 compute
+  JMPGTi r4 0 compute
 
   SIM_RAND r4
   REMi r4 r4 200
