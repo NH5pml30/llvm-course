@@ -4,12 +4,12 @@ extern "C" {
 #include "sim.h"
 }
 
-uintptr_t ctx_regs_stack::alloc(size_t sz) {
+word_t ctx_regs_stack::alloc(size_t sz) {
   return stack -= sz;
 }
 
-intptr_t &ctx_regs_stack::deref(uintptr_t addr) {
-  return *(intptr_t *)&stack_mem[addr];
+sword_t &ctx_regs_stack::deref(word_t addr) {
+  return *(sword_t *)&stack_mem[addr];
 }
 
 int ctx_regs::simRand() {

@@ -42,7 +42,7 @@ struct gen_full_reader : assembler_reader {
     auto *val = builder.CreateConstGEP2_64(reg_file->getValueType(), reg_file,
                                            0, assembler_reader::read(reg{}));
     return proxy{
-        builder.CreateLoad(llvm_type<intptr_t>::get(builder.getContext()), val),
+        builder.CreateLoad(llvm_type<sword_t>::get(builder.getContext()), val),
         val
     };
   }
@@ -50,7 +50,7 @@ struct gen_full_reader : assembler_reader {
     auto *ptr = builder.CreateLoad(llvm_type<void *>::get(builder.getContext()),
                                    read(reg{}).write);
     return proxy{
-        builder.CreateLoad(llvm_type<intptr_t>::get(builder.getContext()), ptr),
+        builder.CreateLoad(llvm_type<sword_t>::get(builder.getContext()), ptr),
         ptr};
   }
 };
@@ -84,14 +84,14 @@ llvm::BasicBlock *gen::create_bb(const std::string &name) {
 void gen::run(std::istream &i) {
   module = new llvm::Module("top", context);
 
-  module->getOrInsertGlobal("reg_file", llvm_type<intptr_t[]>::get(context, ctx_regs_stack::REG_SIZE));
+  module->getOrInsertGlobal("reg_file", llvm_type<sword_t[]>::get(context, ctx_regs_stack::REG_SIZE));
   reg_file = module->getNamedGlobal("reg_file");
 
   llvm::FunctionType *main_type = llvm_type<void()>::get(context);
   main_func = llvm::Function::Create(main_type, llvm::Function::ExternalLinkage,
                                      "main", module);
 
-  reg_type = builder.getIntNTy(CHAR_BIT * sizeof(intptr_t));
+  reg_type = builder.getIntNTy(CHAR_BIT * sizeof(sword_t));
 
   printf = module->getOrInsertFunction(
       "printf", llvm::FunctionType::get(builder.getInt32Ty(),

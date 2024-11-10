@@ -7,7 +7,7 @@ assembler::assembler(std::istream &i) : i(i) {}
 
 void assembler::assembler_writer::write(const std::string &val, label) {
   fixup_labels[mem] = val;
-  byte_io::write(uintptr_t{0}, label{});
+  byte_io::write(word_t{0}, label{});
 }
 
 void assembler::assembler_writer::write(int val, reg) {

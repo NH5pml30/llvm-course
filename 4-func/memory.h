@@ -4,7 +4,7 @@
 
 struct ctx_regs {
   static constexpr size_t REG_SIZE = 16;
-  intptr_t reg_file[REG_SIZE] {};
+  sword_t reg_file[REG_SIZE] {};
 
   int simRand();
   void simFlush();
@@ -17,8 +17,8 @@ struct ctx_regs_stack : ctx_regs {
   unsigned char stack_mem[STACK_SIZE] = {};
   size_t stack = STACK_SIZE;
 
-  uintptr_t alloc(size_t sz);
-  intptr_t &deref(uintptr_t addr);
+  word_t alloc(size_t sz);
+  sword_t &deref(word_t addr);
 };
 
 struct regs_stack_reader : byte_io {
@@ -29,6 +29,6 @@ struct regs_stack_reader : byte_io {
     return cpu.reg_file[byte_io::read(reg{})];
   }
   auto &read(reg_ptr) {
-    return *(intptr_t *)&cpu.stack_mem[read(reg{})];
+    return *(sword_t *)&cpu.stack_mem[read(reg{})];
   }
 };

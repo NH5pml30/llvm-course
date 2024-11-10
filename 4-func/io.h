@@ -31,7 +31,7 @@ struct byte_io {
   }
 
   auto read(label) {
-    return read<uintptr_t>();
+    return read<word_t>();
   }
 
   template<typename T>
@@ -43,8 +43,8 @@ struct byte_io {
     write<uint8_t>(val);
   }
 
-  void write(uintptr_t val, label) {
-    write<uintptr_t>(val);
+  void write(word_t val, label) {
+    write<word_t>(val);
   }
 };
 

@@ -1,8 +1,12 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <tuple>
 #include <utility>
+
+using word_t = uintptr_t;
+using sword_t = std::make_signed_t<word_t>;
 
 template<typename T>
 struct imm {};

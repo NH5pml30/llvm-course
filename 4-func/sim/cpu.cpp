@@ -31,6 +31,6 @@ void CPU::step() {
             });
 }
 
-void CPU::jump(uintptr_t to) {
+void CPU::jump(word_t to) {
   this->PC = to;
 }

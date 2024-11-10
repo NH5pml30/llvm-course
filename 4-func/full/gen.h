@@ -38,5 +38,5 @@ private:
   llvm::BasicBlock *create_bb(const std::string &name);
 
   std::map<llvm::User::op_iterator, std::string> fixup_labels;
-  std::map<std::string, std::pair<uintptr_t, llvm::BasicBlock *>> BBs;
+  std::map<std::string, std::pair<word_t, llvm::BasicBlock *>> BBs;
 };

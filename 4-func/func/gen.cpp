@@ -54,7 +54,7 @@ struct InstWithMappedArgs {
 struct gen_func_writer {
   llvm::IRBuilder<> &builder;
   std::vector<llvm::Value *> args;
-  std::map<std::string, std::pair<uintptr_t, llvm::BasicBlock *>> BBs;
+  std::map<std::string, std::pair<word_t, llvm::BasicBlock *>> BBs;
 
   template<typename T>
   void write(T val) {
@@ -98,7 +98,7 @@ struct gen_full_reader : assembler_reader {
     auto *val = builder.CreateConstGEP2_64(reg_file->getValueType(), reg_file,
                                            0, assembler_reader::read(reg{}));
     return proxy{
-        builder.CreateLoad(llvm_type<intptr_t>::get(builder.getContext()), val),
+        builder.CreateLoad(llvm_type<sword_t>::get(builder.getContext()), val),
         val
     };
   }
@@ -106,7 +106,7 @@ struct gen_full_reader : assembler_reader {
     auto *val = builder.CreateGEP(stack_mem->getValueType(), stack_mem,
                                   {builder.getInt64(0), read(reg{}).read});
     return proxy{
-        builder.CreateLoad(llvm_type<intptr_t>::get(builder.getContext()), val),
+        builder.CreateLoad(llvm_type<sword_t>::get(builder.getContext()), val),
         val
     };
   }
@@ -144,7 +144,7 @@ void gen::run(std::istream &i) {
   module->getOrInsertGlobal("runtime_context", llvm_type<void *>::get(context));
   runtime_context = module->getNamedGlobal("runtime_context");
 
-  module->getOrInsertGlobal("reg_file", llvm_type<intptr_t[]>::get(context, ctx_regs_stack::REG_SIZE));
+  module->getOrInsertGlobal("reg_file", llvm_type<sword_t[]>::get(context, ctx_regs_stack::REG_SIZE));
   reg_file = module->getNamedGlobal("reg_file");
 
   module->getOrInsertGlobal("stack_mem", llvm_type<unsigned char[]>::get(context, ctx_regs_stack::STACK_SIZE));
