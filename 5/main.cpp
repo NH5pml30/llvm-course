@@ -70,7 +70,7 @@ struct CachingInstantiator {
         return CV;
     using namespace StreamOperators;
     std::stringstream Ss;
-    Ss << Name << '<' << K << '>';
+    Ss << Name << '<' << *K << '>';
     return Cache.emplace_back(std::move(K), Eval(std::move(Ss).str(), K))
         .second;
   }
