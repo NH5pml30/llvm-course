@@ -46,7 +46,7 @@ in
 fun drawStars(s: [int], i: int, length: int): () =
   if <(i, length) then
     drawStar(slice(i, 3, s));
-    drawStars(s, +(i, 1), length);
+    drawStars(s, +(i, 3), length);
   fi
 
 fun drawFrame(s: [int], length: int) =
