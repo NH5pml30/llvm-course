@@ -5,13 +5,14 @@
 #include "AST/AST.h"
 #include "ContextVisitor.h"
 
-class TypeChecker : public ContextVisitor<AST::LocalVarDeclNode *> {
+class TypeChecker : public ContextVisitor<Instantiator<AST::LocalVarDeclNode *>> {
 public:
-  using BaseVisitor = ContextVisitor<AST::LocalVarDeclNode *>;
+  using BaseVisitor = ContextVisitor<Instantiator<AST::LocalVarDeclNode *>>;
 
   TypeChecker(
-      std::unordered_map<std::string, AST::LocalVarDeclNode *> GlobalCtx)
-      : ContextVisitor<AST::LocalVarDeclNode *>(std::move(GlobalCtx)) {}
+      std::unordered_map<std::string, Instantiator<AST::LocalVarDeclNode *>>
+          GlobalCtx)
+      : BaseVisitor(std::move(GlobalCtx)) {}
 
   template<typename T>
   void matchTypes(AST::SourceInterval Loc, std::shared_ptr<T> LHS, std::shared_ptr<T> RHS) {
@@ -50,7 +51,7 @@ public:
     exitContext();
   }
   void visit(AST::LocalVarDeclNode *Node) override {
-    registerName(Node->Name, Node);
+    registerName(Node->Name, [Node](auto &&) { return Node; });
   }
   void visit(AST::LocalVarDefNode *Node) override {
     Node->LocalVarDeclNode::accept(*this);
@@ -63,7 +64,19 @@ public:
     matchTypes(Node->Loc, Node->ThenExpr->getType(), Node->ElseExpr->getType());
   }
   void visit(AST::CallExprNode *Node) override {
-    BaseVisitor::visit(Node);
+    {
+      std::vector<AST::PType> ArgTypes;
+      for (auto &A : Node->Args) {
+        A->accept(*this);
+        ArgTypes.push_back(A->getType());
+      }
+      if (auto *Ident = dynamic_cast<AST::IdentExprNode *>(Node->Callee.get())) {
+        resolveIdent(Ident, ArgTypes);
+      } else {
+        Node->Callee->accept(*this);
+      }
+    }
+
     AST::PType T = Node->Callee->getType();
     if (auto FT = std::dynamic_pointer_cast<AST::FunctionType>(T)) {
       if (FT->ParamTypes->ElementTypes.size() != Node->Args.size())
@@ -93,10 +106,19 @@ public:
                std::make_shared<AST::ProductType>(std::move(ElementTypes)));
   }
 
-  void visit(AST::IdentExprNode *Node) override {
-    auto *Decl = resolveName(Node->Name);
-    if (!Decl)
+  void resolveIdent(AST::IdentExprNode *Node, const std::vector<AST::PType> &ArgTs) {
+    auto *R = resolveName(Node->Name);
+    if (!R)
       throw FrontendError(Node->Loc, "unknown name '", Node->Name, "'");
-    updateType(Node->Loc, Node->ExprType, (*Decl)->getType());
+    auto *Decl = (*R)(ArgTs);
+    if (!Decl)
+      throw FrontendError(Node->Loc, "cannot instantiate '", Node->Name,
+                          "' with arguments of types: ",
+                          std::make_shared<AST::ProductType>(ArgTs));
+    updateType(Node->Loc, Node->ExprType, Decl->getType());
+  }
+
+  void visit(AST::IdentExprNode *Node) override {
+    resolveIdent(Node, {});
   }
 };

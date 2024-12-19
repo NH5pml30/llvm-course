@@ -67,9 +67,9 @@ inline llvm::Type *toLLVMType(llvm::LLVMContext &Ctx, AST::PType T) {
   return v.Res;
 }
 
-class LLVMCodeGen : public ContextVisitor<llvm::Value *> {
+class LLVMCodeGen : public ContextVisitor<Instantiator<llvm::Value *>> {
 public:
-  using BaseVisitor = ContextVisitor<llvm::Value *>;
+  using BaseVisitor = ContextVisitor<Instantiator<llvm::Value *>>;
   llvm::Function *CurrFunc{};
   llvm::LLVMContext &LLVMCtx;
   llvm::Module *Module;
@@ -77,10 +77,11 @@ public:
   llvm::Type *Int32Type;
   llvm::Value *Res{};
 
-  LLVMCodeGen(llvm::Module *Module,
-              std::unordered_map<std::string, llvm::Value *> GlobalCtx)
-      : ContextVisitor<llvm::Value *>(std::move(GlobalCtx)),
-        LLVMCtx(Module->getContext()), Module(Module), Builder(LLVMCtx) {
+  LLVMCodeGen(
+      llvm::Module *Module,
+      std::unordered_map<std::string, Instantiator<llvm::Value *>> GlobalCtx)
+      : BaseVisitor(std::move(GlobalCtx)), LLVMCtx(Module->getContext()),
+        Module(Module), Builder(LLVMCtx) {
     Int32Type = Builder.getInt32Ty();
   }
 
@@ -92,12 +93,13 @@ public:
     llvm::BasicBlock *EntryBB = llvm::BasicBlock::Create(LLVMCtx, "entry", CurrFunc);
     Builder.SetInsertPoint(EntryBB);
 
-    registerName(Node->Name, CurrFunc);
+    registerName(Node->Name, [F = CurrFunc](auto &&) { return F; });
 
     enterContext();
 
-    for (int arg = 0; arg < Node->Params.size(); arg++)
-      registerName(Node->Params[arg]->Name, CurrFunc->getArg(arg));
+    for (int Arg = 0; Arg < Node->Params.size(); Arg++)
+      registerName(Node->Params[Arg]->Name,
+                   [F = CurrFunc, Arg](auto &&) { return F->getArg(Arg); });
 
     Node->InitValue->accept(*this);
     Builder.CreateRet(Res);
@@ -108,7 +110,7 @@ public:
 
   void visit(AST::LocalVarDefNode *Node) override {
     Node->InitValue->accept(*this);
-    registerName(Node->Name, Res);
+    registerName(Node->Name, [R = Res](auto &&) { return R; });
   }
   void visit(AST::LetInExprNode *Node) override {
     enterContext();
@@ -170,7 +172,11 @@ public:
     Res = Agg;
   }
   void visit(AST::IdentExprNode *Node) override {
-    Res = *resolveName(Node->Name);
+    if (auto FT = std::dynamic_pointer_cast<AST::FunctionType>(Node->getType())) {
+      Res = (*resolveName(Node->Name))(FT->ParamTypes->ElementTypes);
+    } else {
+      Res = (*resolveName(Node->Name))({});
+    }
   }
   void visit(AST::IntLiteralExprNode *Node) override {
     Res = Builder.getInt32(Node->Value);

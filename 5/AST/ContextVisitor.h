@@ -34,3 +34,6 @@ public:
     return nullptr;
   }
 };
+
+template<typename R>
+using Instantiator = std::function<R (const std::vector<AST::PType> &ArgTs)>;
