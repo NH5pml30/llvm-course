@@ -2,8 +2,10 @@
 
 #include <functional>
 #include <memory>
-#include <vector>
 #include <numeric>
+#include <sstream>
+#include <type_traits>
+#include <vector>
 
 namespace AST {
 struct SourceLocation {
@@ -524,3 +526,48 @@ void Visitor::visit(IdentExprNode *Node) {}
 void Visitor::visit(IntLiteralExprNode *Node) {}
 
 } // namespace AST
+
+inline AST::PType getArrayTy(AST::PType T) {
+  return std::make_shared<AST::ArrayType>(T);
+}
+template<typename ...ArgTs>
+AST::PProductType getProductTy(ArgTs... Ts) {
+  return std::make_shared<AST::ProductType>(std::vector<AST::PType>{Ts...});
+}
+template<typename ...ArgTs>
+AST::PType getFunctionTy(AST::PType RetTy, ArgTs... Ts) {
+  return std::make_shared<AST::FunctionType>(RetTy, getProductTy(Ts...));
+}
+
+inline AST::PType IntTy = AST::IntLiteralExprNode::ExprType;
+inline AST::PType IntArrTy = getArrayTy(IntTy);
+
+namespace StreamOperators {
+inline std::ostream &operator<<(std::ostream &O, AST::Node &Value) {
+  Value.dump(O);
+  return O;
+}
+
+inline std::ostream &operator<<(std::ostream &O, AST::Type &Value) {
+  Value.dump(O);
+  return O;
+}
+}
+
+class FrontendError : public std::exception {
+public:
+  AST::SourceInterval Loc;
+  std::string Message;
+
+  template <typename... ArgTs>
+  FrontendError(AST::SourceInterval Loc, ArgTs &&...Args) : Loc(Loc) {
+    std::stringstream Ss;
+    using namespace StreamOperators;
+    ((Ss << Loc << ' ') << ... << Args);
+    Message = std::move(Ss).str();
+  }
+
+  const char *what() const noexcept override {
+    return Message.c_str();
+  }
+};

@@ -1,7 +1,7 @@
 grammar HA;
 
 @header {
-    #include "AST.h"
+    #include "AST/AST.h"
 }
 
 @parser::members {
@@ -66,15 +66,15 @@ atomExpr returns [AST::PExprNode Result]
     LastT=')' { $Result = std::make_unique<AST::CallExprNode>(toSourceInterval($Callee.start, $LastT), std::move($Callee.Result), std::move(Args)); }
     | First='(' Last=')' { $Result = std::make_unique<AST::ProductExprNode>(toSourceInterval($First, $Last), std::vector<AST::PExprNode>{}); }
     | '(' expr ')' { $Result = std::move($expr.Result); }
-    | '(' atomExpr ',' ')'
+    | First='(' atomExpr ',' Last=')'
     {
         std::vector<AST::PExprNode> Elements;
         Elements.push_back(std::move($atomExpr.Result));
         $Result = std::make_unique<AST::ProductExprNode>(toSourceInterval($First, $Last), std::move(Elements));
     }
-    | '(' atomExpr { std::vector<AST::PExprNode> Elements; Elements.push_back(std::move($atomExpr.Result)); } (
+    | First='(' atomExpr { std::vector<AST::PExprNode> Elements; Elements.push_back(std::move($atomExpr.Result)); } (
             ',' atomExpr { Elements.push_back(std::move($atomExpr.Result)); }
-        )+ ','? ')' { $Result = std::make_unique<AST::ProductExprNode>(toSourceInterval($First, $Last), std::move(Elements)); }
+        )+ ','? Last=')' { $Result = std::make_unique<AST::ProductExprNode>(toSourceInterval($First, $Last), std::move(Elements)); }
     | IDENT { $Result = std::make_unique<AST::IdentExprNode>(toSourceInterval($IDENT), $IDENT->getText()); }
     | literal { $Result = std::move($literal.Result); }
     ;
@@ -148,3 +148,12 @@ INT: DIGIT+;
 NEG_INT: '-' DIGIT+;
 IDENT: IDENT_START (IDENT_START | DIGIT)*;
 WS: [ \t\r\n]+ -> skip;
+
+COMMENT
+    : '#-' .*? '-#' -> skip
+;
+
+LINE_COMMENT
+    : '#' ~[\r\n]* -> skip
+;
+

@@ -10,4 +10,14 @@ fun fib(x: int): int
       fi
     fi
 
-fun app() = fib(11);
+#- ok -#
+# fibs
+fun fibs(x: int, max: int): () =
+  if <(x, max) then
+    write(fib(x));
+    fibs(+(x, 1), max);
+  fi
+
+fun app() =
+  fibs(0, 12);
+  0

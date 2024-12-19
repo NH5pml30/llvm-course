@@ -8,15 +8,15 @@ SIM_Y_SIZE = 256
 fun center(x: int, bound: int) = -(%(x, *(2, bound)), bound)
 
 fun generateStar(s: [int]) =
-  set(0, center(simRand(), WORLD_SIZE_X), s);
-  set(1, center(simRand(), WORLD_SIZE_Y), s);
-  set(2, WORLD_SIZE_Z, s);
+  set_at(0, center(simRand(), WORLD_SIZE_X), s);
+  set_at(1, center(simRand(), WORLD_SIZE_Y), s);
+  set_at(2, WORLD_SIZE_Z, s);
   ()
 
 fun generateStars(s: [int], i: int, length: int): () =
   if <(i, length) then
     generateStar(slice(i, 3, s));
-    set(+(i, 2), %(simRand(), WORLD_SIZE_Z), s);
+    set_at(+(i, 2), %(simRand(), WORLD_SIZE_Z), s);
     generateStars(s, +(i, 3), length)
   fi
 
@@ -24,7 +24,7 @@ fun drawStar(s: [int]) = let
   z = at(2, s),
   new_z = -(z, 1)
 in
-  set(2, new_z, s);
+  set_at(2, new_z, s);
   if <=(new_z, 0) then
     generateStar(s)
   fi;

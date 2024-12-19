@@ -1,7 +1,7 @@
 fun zero(arr: [int], i: int, length: int): ()
   =
     if <(i, length) then
-      set(i, 0, arr);
+      set_at(i, 0, arr);
       zero(arr, +(i, 1), length);
       ()
     fi;
@@ -19,6 +19,6 @@ fun app() =
     arr = alloca int[10]
   in
     zero(arr, 0, 10);
-    set(0, 30, arr);
-    set(1, 40, arr);
+    set_at(0, 30, arr);
+    set_at(1, 40, arr);
     sum(arr, 0, 10);

@@ -6,7 +6,9 @@
 #include <ranges>
 #include <sstream>
 
-#include "AST.h"
+#include "AST/AST.h"
+#include "AST/TypeChecker.h"
+#include "AST/LLVMCodeGen.h"
 
 #include "HALexer.h"
 #include "HAParser.h"
@@ -15,178 +17,14 @@
 
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/Verifier.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 
-extern "C" {
-#include "sim.h"
-}
+#include "sim/sim.h"
 
 using namespace five;
 
 namespace {
-
-template<typename T>
-class ContextVisitor : public AST::Visitor {
-public:
-  std::vector<std::unordered_map<std::string, T>> Contexts;
-
-  ContextVisitor(std::unordered_map<std::string, T> GlobalCtx) : Contexts({std::move(GlobalCtx)}) {}
-
-  void enterContext() {
-    Contexts.emplace_back();
-  }
-
-  void exitContext() {
-    Contexts.pop_back();
-  }
-
-  void registerName(const std::string &Name, T Value) {
-    Contexts.back()[Name] = std::move(Value);
-  }
-
-  T *resolveName(const std::string &Name) {
-    for (auto CtxIt = Contexts.rbegin(); CtxIt != Contexts.rend(); ++CtxIt) {
-      auto &Ctx = *CtxIt;
-      if (auto it = Ctx.find(Name); it != Ctx.end())
-        return &it->second;
-    }
-    return nullptr;
-  }
-};
-
-AST::PType getArrayTy(AST::PType T) {
-  return std::make_shared<AST::ArrayType>(T);
-}
-template<typename ...ArgTs>
-AST::PProductType getProductTy(ArgTs... Ts) {
-  return std::make_shared<AST::ProductType>(std::vector<AST::PType>{Ts...});
-}
-template<typename ...ArgTs>
-AST::PType getFunctionTy(AST::PType RetTy, ArgTs... Ts) {
-  return std::make_shared<AST::FunctionType>(RetTy, getProductTy(Ts...));
-}
-
-AST::PType IntTy = AST::IntLiteralExprNode::ExprType;
-AST::PType IntArrTy = getArrayTy(IntTy);
-
-class TypeChecker : public ContextVisitor<AST::LocalVarDeclNode *> {
-public:
-  using BaseVisitor = ContextVisitor<AST::LocalVarDeclNode *>;
-
-  TypeChecker(
-      std::unordered_map<std::string, AST::LocalVarDeclNode *> GlobalCtx)
-      : ContextVisitor<AST::LocalVarDeclNode *>(std::move(GlobalCtx)) {}
-
-  template<typename T>
-  void matchTypes(AST::SourceInterval Loc, std::shared_ptr<T> LHS, std::shared_ptr<T> RHS) {
-    if (LHS && RHS && !LHS->equals(RHS.get())) {
-      std::cerr << Loc << " incompatible inferred types: ";
-      LHS->dump(std::cerr);
-      std::cerr << " and ";
-      RHS->dump(std::cerr);
-      std::cerr << std::endl;
-      exit(1);
-    }
-  }
-
-  template<typename T>
-  void updateType(AST::SourceInterval Loc, std::shared_ptr<T> &LHS, std::shared_ptr<T> RHS) {
-    matchTypes(Loc, LHS, RHS);
-    LHS = RHS;
-  }
-
-  void visit(AST::FunctionDefNode *Node) override {
-    Node->AST::LocalVarDeclNode::accept(*this);
-    enterContext();
-    BaseVisitor::visit(Node);
-    exitContext();
-    updateType(Node->Loc, Node->RetType, Node->InitValue->getType());
-    AST::PType FunType = Node->computeType();
-    if (!FunType) {
-      if (!Node->RetType) {
-        std::cerr << Node->Loc << " cannot infer return type\n";
-        exit(1);
-      }
-      for (auto &P : Node->Params) {
-        auto T = P->getType();
-        if (!T) {
-          std::cerr << P->Loc << " cannot infer argument type\n";
-          exit(1);
-        }
-      }
-      std::cerr << Node->Loc << " cannot infer function type\n";
-      exit(1);
-    }
-    updateType<AST::Type>(Node->Loc, Node->FunType, FunType);
-  }
-  void visit(AST::LetInExprNode *Node) override {
-    enterContext();
-    BaseVisitor::visit(Node);
-    exitContext();
-  }
-  void visit(AST::LocalVarDeclNode *Node) override {
-    registerName(Node->Name, Node);
-  }
-  void visit(AST::LocalVarDefNode *Node) override {
-    Node->LocalVarDeclNode::accept(*this);
-    Node->InitValue->accept(*this);
-    updateType(Node->Loc, Node->RetType, Node->InitValue->getType());
-  }
-  void visit(AST::IfExprNode *Node) override {
-    BaseVisitor::visit(Node);
-    matchTypes(Node->CondExpr->Loc, Node->CondExpr->getType(), IntTy);
-    matchTypes(Node->Loc, Node->ThenExpr->getType(), Node->ElseExpr->getType());
-  }
-  void visit(AST::CallExprNode *Node) override {
-    BaseVisitor::visit(Node);
-    AST::PType T = Node->Callee->getType();
-    if (auto FT = std::dynamic_pointer_cast<AST::FunctionType>(T)) {
-      if (FT->ParamTypes->ElementTypes.size() != Node->Args.size()) {
-        std::cerr
-            << Node->Loc
-            << " incorrect number of arguments passed to function: expected "
-            << FT->ParamTypes->ElementTypes.size() << ", got "
-            << Node->Args.size() << std::endl;
-        exit(1);
-      }
-      for (int i = 0; i < Node->Args.size(); i++)
-        matchTypes(Node->Args[i]->Loc, Node->Args[i]->getType(), FT->ParamTypes->ElementTypes[i]);
-      updateType(Node->Loc, Node->RetType, FT->RetType);
-    } else {
-      std::cerr << Node->Loc << " cannot infer callee type" << std::endl;
-      exit(1);
-    }
-  }
-  void visit(AST::ProductExprNode *Node) override {
-    BaseVisitor::visit(Node);
-    std::vector<AST::PType> ElementTypes;
-    ElementTypes.reserve(Node->Elements.size());
-    for (auto &E : Node->Elements) {
-      auto ET = E->getType();
-      if (!ET) {
-        std::cerr << Node->Loc << " cannot infer expression type\n";
-        exit(1);
-      }
-      ElementTypes.push_back(ET);
-    }
-    updateType(Node->Loc, Node->ExprType,
-               std::make_shared<AST::ProductType>(std::move(ElementTypes)));
-  }
-
-  void visit(AST::IdentExprNode *Node) override {
-    auto *Decl = resolveName(Node->Name);
-    if (!Decl) {
-      std::cerr << Node->Loc << " unknown name '" << Node->Name << "'\n";
-      exit(1);
-    }
-    updateType(Node->Loc, Node->ExprType, (*Decl)->getType());
-  }
-};
 
 template<typename Visitor>
 class VisitorRunner : public HABaseVisitor {
@@ -202,159 +40,6 @@ public:
   std::any visitVarDef(HAParser::VarDefContext *ctx) override {
     ctx->Result->accept(Checker);
     return {};
-  }
-};
-
-class LLVMTypeVisitor : public AST::TypeVisitor {
-public:
-  llvm::LLVMContext &Ctx;
-  llvm::Type *Res{};
-
-  LLVMTypeVisitor(llvm::LLVMContext &Ctx) : Ctx(Ctx) {}
-
-  void visit(AST::BuiltinAtomType *Type) {
-    switch (Type->Kind) {
-    case AST::BuiltinAtomTypeKind::INT:
-      Res = llvm::Type::getInt32Ty(Ctx);
-      break;
-    default:
-      Res = nullptr;
-      break;
-    }
-  }
-  void visit(AST::ArrayType *Type) {
-    AST::TypeVisitor::visit(Type);
-    Res = llvm::PointerType::get(Res, 0);
-  }
-  void visit(AST::ProductType *Type) {
-    std::vector<llvm::Type *> ElementTypes;
-    ElementTypes.reserve(Type->ElementTypes.size());
-    for (auto &E : Type->ElementTypes) {
-      E->accept(*this);
-      ElementTypes.push_back(Res);
-    }
-    Res = llvm::StructType::get(Ctx, ElementTypes.size());
-  }
-  void visit(AST::FunctionType *Type) {
-    std::vector<llvm::Type *> ParamTypes;
-    ParamTypes.reserve(Type->ParamTypes->ElementTypes.size());
-    for (auto &E : Type->ParamTypes->ElementTypes) {
-      E->accept(*this);
-      ParamTypes.push_back(Res);
-    }
-    Type->RetType->accept(*this);
-    Res = llvm::FunctionType::get(Res, ParamTypes, false);
-  }
-};
-
-llvm::Type *toLLVMType(llvm::LLVMContext &Ctx, AST::PType T) {
-  LLVMTypeVisitor v(Ctx);
-  T->accept(v);
-  return v.Res;
-}
-
-class LLVMCodeGen : public ContextVisitor<llvm::Value *> {
-public:
-  using BaseVisitor = ContextVisitor<llvm::Value *>;
-  llvm::Function *CurrFunc;
-  llvm::LLVMContext &LLVMCtx;
-  llvm::Module *Module;
-  llvm::IRBuilder<> Builder;
-  llvm::Type *Int32Type;
-  llvm::Value *Res;
-
-  LLVMCodeGen(llvm::Module *Module,
-              std::unordered_map<std::string, llvm::Value *> GlobalCtx)
-      : ContextVisitor<llvm::Value *>(std::move(GlobalCtx)),
-        LLVMCtx(Module->getContext()), Module(Module), Builder(LLVMCtx) {
-    Int32Type = Builder.getInt32Ty();
-  }
-
-  void visit(AST::FunctionDefNode *Node) override {
-    llvm::FunctionType *FuncType =
-        cast<llvm::FunctionType>(toLLVMType(LLVMCtx, Node->getType()));
-    CurrFunc = llvm::Function::Create(FuncType, llvm::Function::ExternalLinkage,
-                                      Node->Name, Module);
-    llvm::BasicBlock *EntryBB = llvm::BasicBlock::Create(LLVMCtx, "entry", CurrFunc);
-    Builder.SetInsertPoint(EntryBB);
-
-    registerName(Node->Name, CurrFunc);
-
-    enterContext();
-
-    for (int arg = 0; arg < Node->Params.size(); arg++)
-      registerName(Node->Params[arg]->Name, CurrFunc->getArg(arg));
-
-    Node->InitValue->accept(*this);
-    Builder.CreateRet(Res);
-
-    exitContext();
-  }
-
-  void visit(AST::LocalVarDefNode *Node) override {
-    Node->InitValue->accept(*this);
-    registerName(Node->Name, Res);
-  }
-  void visit(AST::LetInExprNode *Node) override {
-    enterContext();
-    BaseVisitor::visit(Node);
-    exitContext();
-  }
-  void visit(AST::IfExprNode *Node) override {
-    Node->CondExpr->accept(*this);
-    llvm::BasicBlock *ThenBB = llvm::BasicBlock::Create(LLVMCtx, "then", CurrFunc);
-    llvm::BasicBlock *ElseBB = llvm::BasicBlock::Create(LLVMCtx, "else", CurrFunc);
-    llvm::BasicBlock *FiBB = llvm::BasicBlock::Create(LLVMCtx, "fi", CurrFunc);
-    Builder.CreateCondBr(Builder.CreateTrunc(Res, Builder.getInt1Ty()), ThenBB,
-                         ElseBB);
-
-    Builder.SetInsertPoint(ThenBB);
-    Node->ThenExpr->accept(*this);
-    auto *ThenValue = Res;
-    ThenBB = Builder.GetInsertBlock();
-    Builder.CreateBr(FiBB);
-
-    Builder.SetInsertPoint(ElseBB);
-    Node->ElseExpr->accept(*this);
-    auto *ElseValue = Res;
-    ElseBB = Builder.GetInsertBlock();
-    Builder.CreateBr(FiBB);
-
-    Builder.SetInsertPoint(FiBB);
-    auto *PHI = Builder.CreatePHI(toLLVMType(LLVMCtx, Node->getType()), 2);
-    PHI->addIncoming(ThenValue, ThenBB);
-    PHI->addIncoming(ElseValue, ElseBB);
-    Res = PHI;
-  }
-  void visit(AST::AllocaExprNode *Node) override {
-    Node->AllocaSize->accept(*this);
-    Res = Builder.CreateAlloca(toLLVMType(LLVMCtx, Node->AllocaType->ElementType), Res);
-  }
-  void visit(AST::CallExprNode *Node) override {
-    Node->Callee->accept(*this);
-    auto Func = cast<llvm::Function>(Res);
-    std::vector<llvm::Value *> Args;
-    Args.reserve(Node->Args.size());
-    for (auto &A : Node->Args) {
-      A->accept(*this);
-      Args.push_back(Res);
-    }
-    Res = Builder.CreateCall(Func, Args);
-  }
-  void visit(AST::ProductExprNode *Node) override {
-    auto *Type = toLLVMType(LLVMCtx, Node->getType());
-    llvm::Value *Agg = llvm::PoisonValue::get(Type);
-    for (unsigned I = 0; I < Node->Elements.size(); I++) {
-      Node->Elements[I]->accept(*this);
-      Agg = Builder.CreateInsertValue(Agg, Res, {I});
-    }
-    Res = Agg;
-  }
-  void visit(AST::IdentExprNode *Node) override {
-    Res = *resolveName(Node->Name);
-  }
-  void visit(AST::IntLiteralExprNode *Node) override {
-    Res = Builder.getInt32(Node->Value);
   }
 };
 
@@ -438,10 +123,10 @@ std::vector<Builtin> getBuiltins(llvm::Module *Module) {
     Res.push_back({Node, Func});
   }
   {
-    // set (write at index)
+    // set_at (write at index)
     auto ElT = IntTy;
     auto T = getFunctionTy(ElT, IntTy, ElT, getArrayTy(ElT));
-    auto [Node, Func] = StartFunction("set", T);
+    auto [Node, Func] = StartFunction("set_at", T);
     Builder.CreateStore(Func->getArg(1),
                         Builder.CreateGEP(toLLVMType(Ctx, ElT), Func->getArg(2),
                                           Func->getArg(0)));
@@ -457,6 +142,7 @@ std::vector<Builtin> getBuiltins(llvm::Module *Module) {
                                         Func->getArg(0)));
     Res.push_back({Node, Func});
   }
+
   {
     // write int to screen
     auto ElT = IntTy;
@@ -486,15 +172,19 @@ std::vector<Builtin> getBuiltins(llvm::Module *Module) {
 
 }
 
-int main() {
-  std::ifstream in("test.ha");
+int main(int argc, char *argv[]) {
+  if (argc < 2) {
+    std::cerr << "Usage: " << argv[0] << " <source file>" << std::endl;
+    return 1;
+  }
+
+  std::ifstream in(argv[1]);
   antlr4::ANTLRInputStream input(in);
   HALexer lexer(&input);
   antlr4::CommonTokenStream tokens(&lexer);
   HAParser parser(&tokens);
 
   HAParser::FileContext *tree = parser.file();
-  // std::cout << tree->toString() << "\n";
 
   llvm::LLVMContext Ctx;
   llvm::Module *Module = new llvm::Module("app", Ctx);
@@ -502,24 +192,29 @@ int main() {
 
   auto Builtins = getBuiltins(Module);
 
-  {
-    std::unordered_map<std::string, AST::LocalVarDeclNode *> GlobalCtx;
-    for (auto &&[Node, Value] : Builtins)
-      GlobalCtx[Node.Name] = &Node;
+  try {
+    {
+      std::unordered_map<std::string, AST::LocalVarDeclNode *> GlobalCtx;
+      for (auto &&[Node, Value] : Builtins)
+        GlobalCtx[Node.Name] = &Node;
 
-    TypeChecker c{GlobalCtx};
-    VisitorRunner<TypeChecker> r{c};
-    r.visit(tree);
-  }
+      TypeChecker c{GlobalCtx};
+      VisitorRunner<TypeChecker> r{c};
+      r.visit(tree);
+    }
 
-  {
-    std::unordered_map<std::string, llvm::Value *> GlobalCtx;
-    for (auto &&[Node, Value] : Builtins)
-      GlobalCtx[Node.Name] = Value;
+    {
+      std::unordered_map<std::string, llvm::Value *> GlobalCtx;
+      for (auto &&[Node, Value] : Builtins)
+        GlobalCtx[Node.Name] = Value;
 
-    LLVMCodeGen c{Module, GlobalCtx};
-    VisitorRunner<LLVMCodeGen> r{c};
-    r.visit(tree);
+      LLVMCodeGen c{Module, GlobalCtx};
+      VisitorRunner<LLVMCodeGen> r{c};
+      r.visit(tree);
+    }
+  } catch (FrontendError &E) {
+    std::cerr << "FrontendError: " << E.what() << std::endl;
+    return 1;
   }
 
   llvm::outs() << "[LLVM IR]\n";
