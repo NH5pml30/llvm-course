@@ -10,7 +10,9 @@ fun fib(x: int): int
       fi
     fi
 
-#- ok -#
+#-
+ ok
+ -#
 # fibs
 fun fibs(x: int, max: int): () =
   if <(x, max) then

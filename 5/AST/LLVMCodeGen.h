@@ -12,23 +12,26 @@
 class LLVMTypeVisitor : public AST::TypeVisitor {
 public:
   llvm::LLVMContext &Ctx;
+  // Type suitable to pass around and store
   llvm::Type *Res{};
+  // Actual type (raw function type instead of pointer type to function type, for example)
+  llvm::Type *RawRes{};
 
   LLVMTypeVisitor(llvm::LLVMContext &Ctx) : Ctx(Ctx) {}
 
   void visit(AST::BuiltinAtomType *Type) {
     switch (Type->Kind) {
     case AST::BuiltinAtomTypeKind::INT:
-      Res = llvm::Type::getInt32Ty(Ctx);
+      RawRes = Res = llvm::Type::getInt32Ty(Ctx);
       break;
     default:
-      Res = nullptr;
+      RawRes = Res = nullptr;
       break;
     }
   }
   void visit(AST::ArrayType *Type) {
     AST::TypeVisitor::visit(Type);
-    Res = llvm::PointerType::get(Res, 0);
+    RawRes = Res = llvm::PointerType::get(Res, 0);
   }
   void visit(AST::ProductType *Type) {
     std::vector<llvm::Type *> ElementTypes;
@@ -37,7 +40,7 @@ public:
       E->accept(*this);
       ElementTypes.push_back(Res);
     }
-    Res = llvm::StructType::get(Ctx, ElementTypes.size());
+    RawRes = Res = llvm::StructType::get(Ctx, ElementTypes.size());
   }
   void visit(AST::FunctionType *Type) {
     std::vector<llvm::Type *> ParamTypes;
@@ -47,9 +50,16 @@ public:
       ParamTypes.push_back(Res);
     }
     Type->RetType->accept(*this);
-    Res = llvm::FunctionType::get(Res, ParamTypes, false);
+    RawRes = llvm::FunctionType::get(Res, ParamTypes, false);
+    Res = llvm::PointerType::get(RawRes, 0);
   }
 };
+
+inline llvm::Type *toRawLLVMType(llvm::LLVMContext &Ctx, AST::PType T) {
+  LLVMTypeVisitor v(Ctx);
+  T->accept(v);
+  return v.RawRes;
+}
 
 inline llvm::Type *toLLVMType(llvm::LLVMContext &Ctx, AST::PType T) {
   LLVMTypeVisitor v(Ctx);
@@ -76,7 +86,7 @@ public:
 
   void visit(AST::FunctionDefNode *Node) override {
     llvm::FunctionType *FuncType =
-        cast<llvm::FunctionType>(toLLVMType(LLVMCtx, Node->getType()));
+        cast<llvm::FunctionType>(toRawLLVMType(LLVMCtx, Node->getType()));
     CurrFunc = llvm::Function::Create(FuncType, llvm::Function::ExternalLinkage,
                                       Node->Name, Module);
     llvm::BasicBlock *EntryBB = llvm::BasicBlock::Create(LLVMCtx, "entry", CurrFunc);
@@ -139,14 +149,16 @@ public:
   }
   void visit(AST::CallExprNode *Node) override {
     Node->Callee->accept(*this);
-    auto Func = cast<llvm::Function>(Res);
+    auto *Func = Res;
     std::vector<llvm::Value *> Args;
     Args.reserve(Node->Args.size());
     for (auto &A : Node->Args) {
       A->accept(*this);
       Args.push_back(Res);
     }
-    Res = Builder.CreateCall(Func, Args);
+    Res = Builder.CreateCall(llvm::cast<llvm::FunctionType>(toRawLLVMType(
+                                 LLVMCtx, Node->Callee->getType())),
+                             Func, Args);
   }
   void visit(AST::ProductExprNode *Node) override {
     auto *Type = toLLVMType(LLVMCtx, Node->getType());

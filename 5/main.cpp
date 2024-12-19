@@ -82,7 +82,7 @@ std::vector<Builtin> getBuiltins(llvm::Module *Module) {
   auto StartStub = [&](std::string Name, AST::PType T) {
     AST::LocalVarDeclNode Node = {AST::SourceInterval{}, Name, T};
     auto *Func =
-        llvm::Function::Create(cast<llvm::FunctionType>(toLLVMType(Ctx, T)),
+        llvm::Function::Create(cast<llvm::FunctionType>(toRawLLVMType(Ctx, T)),
                                llvm::Function::ExternalLinkage, Name, Module);
     return std::make_pair(Node, Func);
   };
